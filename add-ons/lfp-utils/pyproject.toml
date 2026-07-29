@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ephyr-lfp-utils"
+version = "0.1.0"
+description = "Local field potential tools for Ephyr: interpolated current-source density (CSD) overlay on the signal panel."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    {name = "Aleksandr", email = "sasha.k.1618@gmail.com"},
+    {name = "Anatoly", email = "anatolijlogaskin@gmail.com"},
+]
+dependencies = [
+]
+
+[project.urls]
+Homepage = "https://github.com/Molecular-Neural-Interfaces/ephyr-add-ons/tree/main/add-ons/lfp-utils"
+Repository = "https://github.com/Molecular-Neural-Interfaces/ephyr-add-ons"
+Documentation = "https://github.com/Molecular-Neural-Interfaces/ephyr"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ephyr_add_ons*"]
+namespaces = true
+
+[project.entry-points."ephyr.add_ons"]
+csd = "ephyr_add_ons.lfp_utils.csd:CSDAddOn"

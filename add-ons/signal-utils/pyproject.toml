@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ephyr-signal-utils"
+version = "0.1.0"
+description = "Signal analysis tools for Ephyr: preprocessing comparison, Welch PSD, and STFT spectrograms."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    {name = "Aleksandr", email = "sasha.k.1618@gmail.com"},
+]
+dependencies = [
+    "matplotlib>=3.7",
+]
+
+[project.urls]
+Homepage = "https://github.com/Molecular-Neural-Interfaces/ephyr-add-ons/tree/main/add-ons/signal-utils"
+Repository = "https://github.com/Molecular-Neural-Interfaces/ephyr-add-ons"
+Documentation = "https://github.com/Molecular-Neural-Interfaces/ephyr"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ephyr_add_ons*"]
+namespaces = true
+
+[project.entry-points."ephyr.add_ons"]
+preprocessing_plot = "ephyr_add_ons.signal_utils.preprocessing_plot:PreprocessingPlotAddOn"
+power_spectral_density_plot = "ephyr_add_ons.signal_utils.power_spectral_density_plot:PowerSpectralDensityPlotAddOn"
+spectrogram_plot = "ephyr_add_ons.signal_utils.spectrogram_plot:SpectrogramPlotAddOn"

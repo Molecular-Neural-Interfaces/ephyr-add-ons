@@ -1,0 +1,26 @@
+[
+  {
+    "label": "Labeling utils",
+    "module_name": "ephyr-labeling-utils",
+    "keywords": ["events", "labeling", "TTL", "threshold", "annotation"],
+    "path": "add-ons/labeling-utils"
+  },
+  {
+    "label": "Local field potential utils",
+    "module_name": "ephyr-lfp-utils",
+    "keywords": ["LFP", "CSD", "current source density", "in vivo"],
+    "path": "add-ons/lfp-utils"
+  },
+  {
+    "label": "Signal utils",
+    "module_name": "ephyr-signal-utils",
+    "keywords": ["signal", "preprocessing", "PSD", "spectrogram", "Welch"],
+    "path": "add-ons/signal-utils"
+  },
+  {
+    "label": "Spike utils",
+    "module_name": "ephyr-spike-utils",
+    "keywords": ["spikes", "detection", "raster", "waveforms", "MAD"],
+    "path": "add-ons/spike-utils"
+  }
+]
