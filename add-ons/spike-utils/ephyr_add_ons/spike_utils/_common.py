@@ -144,13 +144,19 @@ def rolling_sigma_mad(
     if int(smooth_windows) > 1 and sigma_arr.size > 1:
         k = int(max(1, smooth_windows))
         sigma_arr = np.convolve(sigma_arr, np.ones(k) / float(k), mode="same")
-    sigma_full = np.interp(
-        np.arange(n, dtype=np.float64),
-        np.asarray(centers, dtype=np.float64),
-        sigma_arr,
-        left=sigma_arr[0],
-        right=sigma_arr[-1],
-    )
+    # Interp in chunks to avoid allocating a full np.arange(n) float64 buffer.
+    sigma_full = np.empty(n, dtype=np.float64)
+    centers_arr = np.asarray(centers, dtype=np.float64)
+    chunk = max(65_536, n // 8 if n > 0 else 65_536)
+    for start in range(0, n, chunk):
+        stop = min(start + chunk, n)
+        sigma_full[start:stop] = np.interp(
+            np.arange(start, stop, dtype=np.float64),
+            centers_arr,
+            sigma_arr,
+            left=sigma_arr[0],
+            right=sigma_arr[-1],
+        )
     global_sigma = max(float(sigma_floor_uv), float(np.median(sigma_arr)))
     lock_n = max(0, min(int(round(w / 2)), n))
     if lock_n > 0:

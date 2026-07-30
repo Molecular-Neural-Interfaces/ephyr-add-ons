@@ -6,6 +6,8 @@ Toolkit for detecting and inspecting spikes in Ephyr. Detection results are stor
 
 **Runnable.** Detects spikes on the full current sweep for the selected channels using a preprocessing pipeline and MAD-based thresholding (global or adaptive rolling sigma). Results are saved per sweep so viewer, navigation, aligned, and raster add-ons can read them.
 
+Channels are processed **one at a time** (load → preprocess → detect → release) so HD-MEA runs do not keep a full `(n_channels × n_samples)` float64 matrix in RAM.
+
 ### Run fields
 
 | Field | Role |

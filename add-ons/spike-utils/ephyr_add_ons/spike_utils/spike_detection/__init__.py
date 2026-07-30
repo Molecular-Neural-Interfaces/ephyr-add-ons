@@ -8,8 +8,9 @@ per sweep so the viewer / navigation / aligned / raster add-ons can read them.
 
 from __future__ import annotations
 
+import gc
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 import numpy as np
 from PyQt6.QtWidgets import (
@@ -29,8 +30,10 @@ from PyQt6.QtWidgets import (
 from ephyr.core.add_ons.base import BaseAddOn
 from ephyr.core.add_ons import (
     PipelineSelector,
+    PreprocessingStep,
     read_pipeline_store,
 )
+from ephyr.core.add_ons.common.preprocessing import apply_single_step, enabled_steps, step_label
 from ephyr.logger import ephyr_logger
 
 from ephyr_add_ons.spike_utils._common import (
@@ -44,6 +47,18 @@ from ephyr_add_ons.spike_utils._common import (
     rolling_sigma_mad,
     safe_detection_dir_name,
 )
+
+# Keep peak RAM near one channel trace on long HD-MEA sweeps.
+_GC_EVERY_N_CHANNELS = 4
+
+
+def _apply_steps_1d(signal_1d: np.ndarray, sample_rate: float, steps: Sequence[PreprocessingStep]) -> np.ndarray:
+    if not steps:
+        return np.asarray(signal_1d, dtype=np.float64)
+    out = np.asarray(signal_1d, dtype=np.float64).reshape(1, -1)
+    for step in steps:
+        out = apply_single_step(out, sample_rate, step)
+    return np.asarray(out[0], dtype=np.float64, order="C")
 
 
 class SpikeDetectionAddOn(SpikeUtilsBase, BaseAddOn):
@@ -221,6 +236,89 @@ class SpikeDetectionAddOn(SpikeUtilsBase, BaseAddOn):
             "selection": selection,
         }
 
+    def _load_channel_signal(
+        self,
+        session_manager,
+        channel_idx: int,
+        sweep_idx: int,
+        sweep_points: int,
+        sample_rate: float,
+    ) -> np.ndarray:
+        matrix = self.channel_matrix_from_session(
+            session_manager, [int(channel_idx)], sweep_idx, 0, sweep_points, sample_rate
+        )
+        if matrix.size == 0:
+            return np.zeros(int(sweep_points), dtype=np.float64)
+        return np.asarray(matrix[0], dtype=np.float64, order="C")
+
+    def _detect_on_signal(
+        self,
+        signal: np.ndarray,
+        sample_rate: float,
+        threshold: float,
+        adaptive_sigma: bool,
+        merge_window_ms: float,
+        detect_negative: bool,
+        detect_positive: bool,
+        sigma_params: dict,
+        valid_mask: np.ndarray,
+    ) -> List[SpikePoint]:
+        sigma_floor = float(sigma_params["sigma_floor_uv"])
+        sigma_t = None
+        if adaptive_sigma:
+            sigma_t = rolling_sigma_mad(
+                signal,
+                sample_rate,
+                window_ms=float(sigma_params["window_ms"]),
+                step_ms=float(sigma_params["step_ms"]),
+                sigma_floor_uv=sigma_floor,
+                smooth_windows=int(sigma_params["smooth_windows"]),
+                mask=valid_mask if valid_mask.size == signal.size else None,
+            )
+        found = []
+        for polarity_positive in ([False] if detect_negative else []) + (
+            [True] if detect_positive else []
+        ):
+            if adaptive_sigma:
+                found.extend(
+                    detect_spikes_adaptive_mad(
+                        signal,
+                        sample_rate,
+                        threshold,
+                        merge_window_ms,
+                        polarity_positive,
+                        sigma_t,
+                        sigma_floor,
+                    )
+                )
+            else:
+                found.extend(
+                    detect_spikes_mad(
+                        signal, sample_rate, threshold, merge_window_ms, polarity_positive, sigma_floor
+                    )
+                )
+        del sigma_t
+        if valid_mask.size == signal.size:
+            found = [
+                sp
+                for sp in found
+                if 0 <= int(sp.sample_idx) < valid_mask.size and valid_mask[int(sp.sample_idx)]
+            ]
+        merged = (
+            merge_spikes_global(found, sample_rate, min_distance_ms=merge_window_ms)
+            if detect_negative and detect_positive
+            else sorted(found, key=lambda sp: int(sp.sample_idx))
+        )
+        return [
+            SpikePoint(
+                sample_idx=int(sp.sample_idx),
+                time_ms=float(sp.sample_idx) / sample_rate * 1000.0,
+                value=float(sp.value),
+                polarity=str(sp.polarity),
+            )
+            for sp in merged
+        ]
+
     def run(self, session_manager, add_on_data_dir):
         header = session_manager.header
         add_on_data_dir = Path(add_on_data_dir)
@@ -231,18 +329,16 @@ class SpikeDetectionAddOn(SpikeUtilsBase, BaseAddOn):
         sweep_idx = int(session_manager.gui_setup.current_sweep_idx)
         sample_rate = float(header.sample_rate)
         sweep_points = int(header.number_of_points_per_sweep[sweep_idx])
-        channels = params["channels"]
-        matrix = self.channel_matrix_from_session(
-            session_manager, channels, sweep_idx, 0, sweep_points, sample_rate
-        )
+        channels = list(params["channels"])
+        total = len(channels)
+        if total == 0:
+            return
 
         store = read_pipeline_store(self.pipelines_path(add_on_data_dir))
-        processed = yield from self.iter_apply_pipeline(
-            matrix, sample_rate, store.get(params["pipeline"]), base_progress=0, progress_span=40
-        )
-        processed = np.asarray(processed, dtype=np.float64)
+        pipeline = store.get(params["pipeline"])
+        steps = enabled_steps(pipeline)
 
-        end_second = sweep_points / sample_rate
+        end_second = sweep_points / sample_rate if sample_rate > 0 else 0.0
         selection = params["selection"]
         valid_mask = self.build_selection_valid_mask(
             session_manager,
@@ -260,52 +356,49 @@ class SpikeDetectionAddOn(SpikeUtilsBase, BaseAddOn):
         detect_negative = params["detect_negative"]
         detect_positive = params["detect_positive"]
         sigma_params = params["sigma_params"]
-        sigma_floor = float(sigma_params["sigma_floor_uv"])
+
+        if steps:
+            yield {
+                "progress": 5,
+                "message": "Preprocessing per channel: " + ", ".join(step_label(s) for s in steps),
+            }
+        else:
+            yield {"progress": 5, "message": "Detecting spikes per channel…"}
 
         spikes_by_channel = {}
-        total = len(channels)
         for row_idx, channel_idx in enumerate(channels):
-            signal = np.asarray(processed[row_idx], dtype=np.float64) if row_idx < processed.shape[0] else np.zeros(sweep_points)
-            sigma_t = None
-            if adaptive_sigma:
-                sigma_t = rolling_sigma_mad(
-                    signal,
-                    sample_rate,
-                    window_ms=float(sigma_params["window_ms"]),
-                    step_ms=float(sigma_params["step_ms"]),
-                    sigma_floor_uv=sigma_floor,
-                    smooth_windows=int(sigma_params["smooth_windows"]),
-                    mask=valid_mask if valid_mask.size == signal.size else None,
-                )
-            found = []
-            for polarity_positive in ([False] if detect_negative else []) + ([True] if detect_positive else []):
-                if adaptive_sigma:
-                    found.extend(
-                        detect_spikes_adaptive_mad(
-                            signal, sample_rate, threshold, merge_window_ms, polarity_positive, sigma_t, sigma_floor
-                        )
-                    )
-                else:
-                    found.extend(
-                        detect_spikes_mad(signal, sample_rate, threshold, merge_window_ms, polarity_positive, sigma_floor)
-                    )
-            if valid_mask.size == signal.size:
-                found = [sp for sp in found if 0 <= int(sp.sample_idx) < valid_mask.size and valid_mask[int(sp.sample_idx)]]
-            merged = (
-                merge_spikes_global(found, sample_rate, min_distance_ms=merge_window_ms)
-                if detect_negative and detect_positive
-                else sorted(found, key=lambda sp: int(sp.sample_idx))
+            signal = self._load_channel_signal(
+                session_manager, int(channel_idx), sweep_idx, sweep_points, sample_rate
             )
-            spikes_by_channel[int(channel_idx)] = [
-                SpikePoint(
-                    sample_idx=int(sp.sample_idx),
-                    time_ms=float(sp.sample_idx) / sample_rate * 1000.0,
-                    value=float(sp.value),
-                    polarity=str(sp.polarity),
+            signal = _apply_steps_1d(signal, sample_rate, steps)
+            # Mask may be full-sweep length; trim steps can shorten the trace.
+            channel_mask = valid_mask
+            if channel_mask.size != signal.size:
+                channel_mask = (
+                    valid_mask[: signal.size]
+                    if channel_mask.size > signal.size
+                    else np.ones(signal.size, dtype=bool)
                 )
-                for sp in merged
-            ]
-            yield {"progress": int(40 + ((row_idx + 1) / total) * 55), "message": f"Detected on channel {row_idx + 1}/{total}"}
+            spikes_by_channel[int(channel_idx)] = self._detect_on_signal(
+                signal,
+                sample_rate,
+                threshold,
+                adaptive_sigma,
+                merge_window_ms,
+                detect_negative,
+                detect_positive,
+                sigma_params,
+                channel_mask,
+            )
+            del signal
+            if (row_idx + 1) % _GC_EVERY_N_CHANNELS == 0:
+                gc.collect()
+            yield {
+                "progress": int(5 + ((row_idx + 1) / total) * 90),
+                "message": f"Detected on channel {row_idx + 1}/{total}",
+            }
+
+        gc.collect()
 
         out_dir = add_on_data_dir / safe_detection_dir_name(
             params["pipeline"],
