@@ -2,7 +2,7 @@
 
 Official catalog of installable add-ons for **[Ephyr](https://github.com/Molecular-Neural-Interfaces/ephyr)**.
 
-Ephyr is a lightweight yet powerful environment for multimodal annotation of electrophysiological data. It combines an adaptive interface with intelligent performance scaling to match your machine’s resources, ensuring stable real-time operation even under heavy loads.
+Ephyr is a lightweight yet powerful environment for labelling electrophysiological data. It combines an adaptive interface with intelligent performance scaling to match your machine’s resources, ensuring stable real-time operation even under heavy loads.
 
 Fully open-source and built in Python, the platform provides a flexible API for post-annotation data access. Its add-on architecture lets you extend functionality seamlessly without modifying the core codebase.
 
