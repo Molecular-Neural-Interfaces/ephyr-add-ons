@@ -5,13 +5,15 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ephyr-labeling-utils"
 version = "0.1.0"
-description = "Labeling tools for Ephyr: automatic event detection (TTL and above-threshold) into the session vocabulary."
+description = "Labeling tools for Ephyr: automatic event detection (TTL and above-threshold) and video / NWB imaging–timeline sync."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
     {name = "Aleksandr", email = "sasha.k.1618@gmail.com"},
 ]
 dependencies = [
+    "opencv-python>=4.8",
+    "pynwb>=2.0",
 ]
 
 [project.urls]
@@ -26,3 +28,4 @@ namespaces = true
 
 [project.entry-points."ephyr.add_ons"]
 events_detection = "ephyr_add_ons.labeling_utils.events_detection:EventsDetectionAddOn"
+video_sync = "ephyr_add_ons.labeling_utils.video_sync:VideoSyncAddOn"

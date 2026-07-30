@@ -2,7 +2,7 @@
   {
     "label": "Labeling utils",
     "module_name": "ephyr-labeling-utils",
-    "keywords": ["events", "labeling", "TTL", "threshold", "annotation"],
+    "keywords": ["events", "labeling", "TTL", "threshold", "annotation", "video", "sync"],
     "path": "add-ons/labeling-utils"
   },
   {
