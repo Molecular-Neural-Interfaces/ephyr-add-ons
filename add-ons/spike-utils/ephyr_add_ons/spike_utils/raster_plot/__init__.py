@@ -41,11 +41,11 @@ class RasterPlotAddOn(SpikeUtilsBase, BaseAddOn):
 
     def _ask_parameters(self, session_manager, header, add_on_data_dir: Path) -> Optional[dict]:
         params = self.load_params(add_on_data_dir)
-        selected_dir = self.choose_result_dir_dialog(
+        selected_dir = self.choose_spike_set_dialog(
             "Raster plot",
             add_on_data_dir,
             selected_dir=str(params.get("selected_dir", "")),
-            label="Detection method:",
+            label="Spike set:",
         )
         if selected_dir is None:
             return None
@@ -56,18 +56,18 @@ class RasterPlotAddOn(SpikeUtilsBase, BaseAddOn):
             QMessageBox.warning(
                 None,
                 "Raster plot",
-                "No spikes for current sweep in selected detection method.",
+                "No spikes for current sweep in the selected spike set.",
             )
             return None
 
-        detection_channels = self.channels_for_detection_payload(
+        set_channels = self.channels_for_spikes_payload(
             payload,
             channel_groups=session_manager.gui_setup.channels_groups,
         )
-        if not detection_channels:
-            detection_channels = sorted(int(ch) for ch in payload.spikes_by_channel.keys())
-        if not detection_channels:
-            QMessageBox.warning(None, "Raster plot", "Selected detection has no channels.")
+        if not set_channels:
+            set_channels = sorted(int(ch) for ch in payload.spikes_by_channel.keys())
+        if not set_channels:
+            QMessageBox.warning(None, "Raster plot", "The selected spike set has no channels.")
             return None
 
         dialog = QDialog()
@@ -80,17 +80,17 @@ class RasterPlotAddOn(SpikeUtilsBase, BaseAddOn):
         scroll_widget = QWidget()
         form = QFormLayout(scroll_widget)
 
-        meta = self.read_detection_meta(selected_dir)
+        meta = self.read_spike_set_meta(selected_dir)
         group_label = QLabel(
             (payload.group_name or meta.group_name or "Group").strip() or "Group"
         )
-        form.addRow("Detection group:", group_label)
+        form.addRow("Channels group:", group_label)
 
         channels_list = QListWidget()
         channels_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
         preferred = set(int(c) for c in (params.get("channel_indexes") or []))
         select_all = not preferred
-        for ch_idx in detection_channels:
+        for ch_idx in set_channels:
             ch_name = self.channel_name(header, int(ch_idx))
             item = QListWidgetItem(f"{ch_idx} [{ch_name}]")
             item.setData(Qt.ItemDataRole.UserRole, int(ch_idx))
@@ -180,19 +180,34 @@ class RasterPlotAddOn(SpikeUtilsBase, BaseAddOn):
         start_s = params["window_from_ms"] / 1000.0
         end_s = params["window_to_ms"] / 1000.0
 
-        xs: List[float] = []
-        ys: List[float] = []
+        # Only a sorted set is worth splitting into per-cluster series.
+        clusters = [cluster for cluster in payload.clusters() if cluster != 0]
+        color_by_cluster = len(clusters) > 1
+
+        series: dict = {}
+        total_spikes = 0
         for row_idx, channel_idx in enumerate(channels):
             for spike in payload.spikes_by_channel.get(int(channel_idx), []):
                 t = float(spike.time_ms) / 1000.0
-                if start_s <= t <= end_s:
-                    xs.append(t)
-                    ys.append(row_idx)
+                if not (start_s <= t <= end_s):
+                    continue
+                key = int(spike.cluster) if color_by_cluster else None
+                xs, ys = series.setdefault(key, ([], []))
+                xs.append(t)
+                ys.append(row_idx)
+                total_spikes += 1
 
         n_channels = max(1, len(channels))
         fig, ax = plt.subplots(figsize=(14, max(4, 0.35 * n_channels + 2)))
-        if xs:
-            ax.plot(np.asarray(xs), np.asarray(ys), "|", color="black", markersize=10)
+        for key in sorted(series.keys(), key=lambda k: (k is not None, k)):
+            xs, ys = series[key]
+            if key is None:
+                ax.plot(np.asarray(xs), np.asarray(ys), "|", color="black", markersize=10)
+            else:
+                label = f"Cluster {key}" if key else "Unclustered"
+                ax.plot(np.asarray(xs), np.asarray(ys), "|", markersize=10, label=label)
+        if color_by_cluster and series:
+            ax.legend(loc="upper right", fontsize=8, markerscale=1.0)
         ax.set_xlim(start_s, end_s)
         ax.set_ylim(-0.5, n_channels - 0.5)
         ax.invert_yaxis()  # channel 0 at top, ascending downward
@@ -202,7 +217,7 @@ class RasterPlotAddOn(SpikeUtilsBase, BaseAddOn):
         ax.set_ylabel("Channel")
         ax.grid(True, axis="x", alpha=0.3)
         ax.set_title(
-            f"Raster plot | {self.detection_result_label(params['selected_dir'])} | sweep {sweep_idx}"
+            f"Raster plot | {self.spike_set_label(params['selected_dir'])} | sweep {sweep_idx}"
         )
         fig.tight_layout()
         if params["plot_image"]:
@@ -213,4 +228,4 @@ class RasterPlotAddOn(SpikeUtilsBase, BaseAddOn):
                 plt.close(fig)
         else:
             plt.close(fig)
-        yield {"progress": 100, "message": f"Raster plotted ({len(xs)} spikes)"}
+        yield {"progress": 100, "message": f"Raster plotted ({total_spikes} spikes)"}

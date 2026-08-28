@@ -1,9 +1,10 @@
 """Spike viewer add-on.
 
-Runnable + Viewable. ``run()`` opens a dialog to pick one or more detection
-methods (each already bound to a channel group). ``view()`` overlays markers for
-all selected results: same-group methods use different colors and are stacked
-upward; methods for different groups are drawn on their own groups.
+Runnable + Viewable. ``run()`` opens a dialog to pick one or more spike sets,
+detected or imported (each already bound to a channel group). ``view()`` overlays
+markers for all selected sets: same-group sets use different colors and are
+stacked upward; sets for different groups are drawn on their own groups. Within a
+set that carries sorting labels, each cluster gets its own color.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from ephyr.logger import ephyr_logger
 
 from ephyr_add_ons.spike_utils._common import SpikesPayload, SpikeUtilsBase
 
-# Distinct marker colors for overlapping methods on the same group.
+# Distinct marker colors for overlapping sets on the same group.
 _MARKER_COLORS = (
     QColor(255, 0, 0),
     QColor(0, 140, 255),
@@ -33,6 +34,19 @@ _MARKER_COLORS = (
     QColor(80, 80, 80),
 )
 
+# Distinct marker colors for the clusters of a sorted set.
+_CLUSTER_COLORS = (
+    QColor(220, 0, 0),
+    QColor(0, 110, 220),
+    QColor(0, 160, 60),
+    QColor(230, 130, 0),
+    QColor(150, 0, 200),
+    QColor(0, 165, 165),
+    QColor(210, 0, 130),
+    QColor(120, 90, 40),
+    QColor(90, 90, 90),
+)
+
 
 class SpikeViewerAddOn(SpikeUtilsBase, BaseAddOn):
     TRANSFORMATION = False
@@ -41,7 +55,7 @@ class SpikeViewerAddOn(SpikeUtilsBase, BaseAddOn):
     Z_INDEX = 250
 
     def __init__(self):
-        # Cache payloads per detection dir: path -> (mtime, payload)
+        # Cache payloads per spike set dir: path -> (mtime, payload)
         self._payload_cache: Dict[str, Tuple[float, SpikesPayload]] = {}
 
     @staticmethod
@@ -55,11 +69,11 @@ class SpikeViewerAddOn(SpikeUtilsBase, BaseAddOn):
     def run(self, session_manager, add_on_data_dir):
         add_on_data_dir = Path(add_on_data_dir)
         params = self.load_params(add_on_data_dir)
-        selected = self.choose_result_dirs_dialog(
+        selected = self.choose_spike_sets_dialog(
             "Spike viewer",
             add_on_data_dir,
             selected_dirs=self._selected_dirs_from_params(params),
-            label="Detection methods:",
+            label="Spike sets:",
         )
         if selected is None:
             return
@@ -70,15 +84,13 @@ class SpikeViewerAddOn(SpikeUtilsBase, BaseAddOn):
 
         sweep_idx = int(session_manager.gui_setup.current_sweep_idx)
         total_spikes = 0
-        labels: List[str] = []
         for path in selected:
             payload = self.read_spikes_payload(path, sweep_idx)
             if payload is not None:
                 total_spikes += sum(len(v) for v in payload.spikes_by_channel.values())
-            labels.append(self.detection_result_label(path))
         yield {
             "progress": 100,
-            "message": f"Viewing {len(selected_dirs)} method(s), {total_spikes} spikes",
+            "message": f"Viewing {len(selected_dirs)} spike set(s), {total_spikes} spikes",
         }
 
     def _load_payloads(
@@ -153,34 +165,37 @@ class SpikeViewerAddOn(SpikeUtilsBase, BaseAddOn):
         if not loaded:
             return
 
-        # Within one group, stack methods upward with distinct colors.
+        # Within one group, stack sets upward with distinct colors.
         by_group: Dict[str, List[int]] = defaultdict(list)
-        for method_idx, (_result_dir, payload) in enumerate(loaded):
-            group_key = str(payload.group_key or "").strip() or f"__method_{method_idx}"
-            by_group[group_key].append(method_idx)
+        for set_idx, (_set_dir, payload) in enumerate(loaded):
+            group_key = str(payload.group_key or "").strip() or f"__set_{set_idx}"
+            by_group[group_key].append(set_idx)
 
         offset_rank: Dict[int, int] = {}
         for _group_key, indexes in by_group.items():
-            for rank, method_idx in enumerate(indexes):
-                offset_rank[method_idx] = rank
+            for rank, set_idx in enumerate(indexes):
+                offset_rank[set_idx] = rank
 
         marker_size = 4
         half = marker_size // 2
         stack_step = marker_size + 2
 
-        for method_idx, (_result_dir, payload) in enumerate(loaded):
-            color = _MARKER_COLORS[method_idx % len(_MARKER_COLORS)]
-            y_shift = -offset_rank.get(method_idx, 0) * stack_step
+        for set_idx, (_set_dir, payload) in enumerate(loaded):
+            set_color = _MARKER_COLORS[set_idx % len(_MARKER_COLORS)]
+            # A sorted set gets one color per cluster; an unsorted one keeps the set color.
+            cluster_colors = self._cluster_color_map(payload)
+            y_shift = -offset_rank.get(set_idx, 0) * stack_step
 
             allowed_channels = set(
-                self.channels_for_detection_payload(payload, channel_groups=channel_groups)
+                self.channels_for_spikes_payload(payload, channel_groups=channel_groups)
             )
             allowed_channels.update(int(ch) for ch in (payload.spikes_by_channel or {}).keys())
             if not allowed_channels:
                 continue
 
-            painter.setPen(QPen(color))
-            painter.setBrush(color)
+            painter.setPen(QPen(set_color))
+            painter.setBrush(set_color)
+            current_color = set_color
             for channel_idx, rect in channel_rects:
                 ch = int(channel_idx)
                 if ch not in allowed_channels:
@@ -192,6 +207,21 @@ class SpikeViewerAddOn(SpikeUtilsBase, BaseAddOn):
                 for spike in spikes:
                     if not (start_time_ms <= spike.time_ms <= end_time_ms):
                         continue
+                    color = cluster_colors.get(int(spike.cluster), set_color) if cluster_colors else set_color
+                    if color is not current_color:
+                        painter.setPen(QPen(color))
+                        painter.setBrush(color)
+                        current_color = color
                     rel = (spike.time_ms - start_time_ms) / axis_duration_ms
                     x = int(rect.left() + rel * rect.width())
                     painter.drawRect(x - half, y - half, marker_size, marker_size)
+
+    @staticmethod
+    def _cluster_color_map(payload: SpikesPayload) -> Dict[int, QColor]:
+        clusters = [cluster for cluster in payload.clusters() if cluster != 0]
+        if len(clusters) < 2:
+            return {}
+        return {
+            cluster: _CLUSTER_COLORS[idx % len(_CLUSTER_COLORS)]
+            for idx, cluster in enumerate(clusters)
+        }

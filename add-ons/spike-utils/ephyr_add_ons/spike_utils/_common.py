@@ -1,14 +1,22 @@
 """Group-shared code for the Spike utils add-ons.
 
 Holds the spike payload models, MAD-based detection algorithms and helpers to
-locate/read detection results produced by the spike_detection add-on. Depends
-only on shared core infrastructure, never on another add-on group.
+locate/read the spike sets produced by the spike_detection and spike_importer
+add-ons. Depends only on shared core infrastructure, never on another add-on
+group.
+
+Every spike set lives in its own directory under the experiment-wide
+``add_ons/data/spike_sets`` folder, so that any spike add-on can read sets
+regardless of which add-on produced them:
+
+    add_ons/data/spike_sets/{set_name}/spike_set_meta.json
+    add_ons/data/spike_sets/{set_name}/{sweep_idx}.spikes.json
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -32,7 +40,14 @@ from ephyr.core.add_ons import EphyrAddOnMixin
 from ephyr.logger import ephyr_logger
 
 DEFAULT_PIPELINE_NAME = "raw"
-DETECTION_MODULE_NAME = "spike_detection"
+SPIKE_SETS_FOLDER_NAME = "spike_sets"
+
+SOURCE_DETECTED = "detected"
+SOURCE_IMPORTED = "imported"
+
+NO_SPIKE_SETS_MESSAGE = (
+    "No spike sets yet. Run Spike detection, or import spikes with Spike importer first."
+)
 
 
 class SpikePoint(BaseModel):
@@ -40,10 +55,14 @@ class SpikePoint(BaseModel):
     time_ms: float
     value: float
     polarity: str = "negative"
+    # Sorting label inside the set: the detection method identifies the set,
+    # while the cluster tells which unit the spike was assigned to (0 = unclustered).
+    cluster: int = 0
 
 
 class SpikesPayload(BaseModel):
     detector_name: str = "mad"
+    source: str = SOURCE_DETECTED
     preprocessing_pipeline: str = DEFAULT_PIPELINE_NAME
     threshold: float = 6.0
     sweep_idx: int
@@ -61,28 +80,61 @@ class SpikesPayload(BaseModel):
     ignore_period_names: List[str] = Field(default_factory=list)
     events_mode: str = "ignore"
     periods_mode: str = "ignore"
+    source_file: str = ""
     spikes_by_channel: Dict[int, List[SpikePoint]] = Field(default_factory=dict)
 
+    def clusters(self) -> List[int]:
+        found = {
+            int(spike.cluster)
+            for spikes in (self.spikes_by_channel or {}).values()
+            for spike in spikes
+        }
+        return sorted(found)
 
-DETECTION_META_FILENAME = "detection_meta.json"
+
+SPIKE_SET_META_FILENAME = "spike_set_meta.json"
 
 
 @dataclass
-class DetectionResultMeta:
+class SpikeSetMeta:
+    """Description of one spike set, shared by every spike add-on."""
+
+    source: str = SOURCE_DETECTED
+    detector_name: str = "mad"
     group_key: str = ""
     group_name: str = ""
     preprocessing_pipeline: str = DEFAULT_PIPELINE_NAME
     threshold: float = 6.0
     adaptive_sigma: bool = True
-    detector_name: str = "mad"
+    clusters: List[int] = field(default_factory=list)
+    source_file: str = ""
+    created_at: str = ""
+
+    @property
+    def is_imported(self) -> bool:
+        return str(self.source) == SOURCE_IMPORTED
 
     def display_label(self, fallback_name: str = "") -> str:
+        if self.is_imported:
+            parts = [(self.detector_name or "imported").strip(), SOURCE_IMPORTED]
+            if self.source_file:
+                parts.append(Path(self.source_file).name)
+            parts.append(self._clusters_label())
+            return " | ".join(part for part in parts if part)
+
         group = (self.group_name or "").strip() or "Group"
         pipeline = (self.preprocessing_pipeline or "").strip() or DEFAULT_PIPELINE_NAME
         mode = "adaptive" if self.adaptive_sigma else "global"
         mult = f"{float(self.threshold):.6f}".rstrip("0").rstrip(".")
-        label = f"{group} | {pipeline} | {mode} MAD×{mult}"
+        parts = [group, SOURCE_DETECTED, pipeline, f"{mode} MAD×{mult}", self._clusters_label()]
+        label = " | ".join(part for part in parts if part)
         return label if (self.group_name or self.preprocessing_pipeline) else (fallback_name or label)
+
+    def _clusters_label(self) -> str:
+        real_clusters = [cluster for cluster in (self.clusters or []) if int(cluster) != 0]
+        if not real_clusters:
+            return ""
+        return f"{len(real_clusters)} clusters" if len(real_clusters) > 1 else "1 cluster"
 
 
 @dataclass
@@ -252,59 +304,73 @@ def merge_spikes_global(spikes: Sequence[SpikeCandidate], fs: float, min_distanc
     return picked
 
 
-def safe_detection_dir_name(
+def _sanitize_name_part(value: str, fallback: str) -> str:
+    clean = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in (value or "").strip())
+    return clean or fallback
+
+
+def safe_detected_set_dir_name(
     pipeline_name: str,
     threshold: float,
     adaptive: bool,
     group_name: str = "",
 ) -> str:
-    def _sanitize(value: str, fallback: str) -> str:
-        clean = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in (value or "").strip())
-        return clean or fallback
-
-    clean_group = _sanitize(group_name, "group")
-    clean_pipe = _sanitize(pipeline_name, "raw")
+    clean_group = _sanitize_name_part(group_name, "group")
+    clean_pipe = _sanitize_name_part(pipeline_name, "raw")
     mult = f"{float(threshold):.6f}".rstrip("0").rstrip(".").replace(".", "_")
     mode = "adaptive" if adaptive else "global"
     return f"{clean_group}__{clean_pipe}_{mode}_mad_{mult}"
 
 
-# ---- Base with detection-result locating/reading ----
+def safe_imported_set_dir_name(source_file_name: str, method_name: str) -> str:
+    clean_source = _sanitize_name_part(Path(source_file_name).stem, "spikes")
+    clean_method = _sanitize_name_part(method_name, "imported")
+    return f"{SOURCE_IMPORTED}__{clean_source}__{clean_method}"
+
+
+# ---- Base with spike-set locating/reading ----
 
 class SpikeUtilsBase(EphyrAddOnMixin):
-    def detection_dir(self, add_on_data_dir: Path) -> Path:
+    def spike_sets_dir(self, add_on_data_dir: Path) -> Path:
+        """Experiment-wide folder holding every spike set, whatever produced it."""
         name = Path(add_on_data_dir).name
         prefix = "dev_" if name.startswith("dev_") else ""
-        return Path(add_on_data_dir).parent / f"{prefix}{DETECTION_MODULE_NAME}"
+        return Path(add_on_data_dir).parent / f"{prefix}{SPIKE_SETS_FOLDER_NAME}"
 
-    def list_detection_result_dirs(self, add_on_data_dir: Path) -> List[Path]:
-        base = self.detection_dir(add_on_data_dir)
+    def list_spike_set_dirs(self, add_on_data_dir: Path) -> List[Path]:
+        base = self.spike_sets_dir(add_on_data_dir)
         if not base.exists():
             return []
         return sorted([p for p in base.iterdir() if p.is_dir()], key=lambda p: p.name)
 
-    def detection_meta_path(self, result_dir: Path) -> Path:
-        return Path(result_dir) / DETECTION_META_FILENAME
+    def spike_set_meta_path(self, set_dir: Path) -> Path:
+        return Path(set_dir) / SPIKE_SET_META_FILENAME
 
-    def save_detection_meta(self, result_dir: Path, meta: DetectionResultMeta) -> None:
-        path = self.detection_meta_path(result_dir)
+    def save_spike_set_meta(self, set_dir: Path, meta: SpikeSetMeta) -> None:
+        path = self.spike_set_meta_path(set_dir)
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
+            "source": str(meta.source or SOURCE_DETECTED),
+            "detector_name": str(meta.detector_name or "mad"),
             "group_key": str(meta.group_key or ""),
             "group_name": str(meta.group_name or ""),
             "preprocessing_pipeline": str(meta.preprocessing_pipeline or DEFAULT_PIPELINE_NAME),
             "threshold": float(meta.threshold),
             "adaptive_sigma": bool(meta.adaptive_sigma),
-            "detector_name": str(meta.detector_name or "mad"),
+            "clusters": [int(cluster) for cluster in (meta.clusters or [])],
+            "source_file": str(meta.source_file or ""),
+            "created_at": str(meta.created_at or ""),
         }
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-    def read_detection_meta(self, result_dir: Path) -> DetectionResultMeta:
-        path = self.detection_meta_path(result_dir)
+    def read_spike_set_meta(self, set_dir: Path) -> SpikeSetMeta:
+        path = self.spike_set_meta_path(set_dir)
         if path.exists():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
-                return DetectionResultMeta(
+                return SpikeSetMeta(
+                    source=str(data.get("source", SOURCE_DETECTED) or SOURCE_DETECTED),
+                    detector_name=str(data.get("detector_name", "mad") or "mad"),
                     group_key=str(data.get("group_key", "") or ""),
                     group_name=str(data.get("group_name", "") or ""),
                     preprocessing_pipeline=str(
@@ -312,33 +378,38 @@ class SpikeUtilsBase(EphyrAddOnMixin):
                     ),
                     threshold=float(data.get("threshold", 6.0)),
                     adaptive_sigma=bool(data.get("adaptive_sigma", True)),
-                    detector_name=str(data.get("detector_name", "mad") or "mad"),
+                    clusters=[int(cluster) for cluster in (data.get("clusters") or [])],
+                    source_file=str(data.get("source_file", "") or ""),
+                    created_at=str(data.get("created_at", "") or ""),
                 )
             except Exception as e:
                 ephyr_logger().debug(str(e))
 
         # Fallback: infer from any sweep payload in the directory.
-        for spikes_path in sorted(Path(result_dir).glob("*.spikes.json")):
+        for spikes_path in sorted(Path(set_dir).glob("*.spikes.json")):
             try:
                 payload = SpikesPayload.model_validate_json(spikes_path.read_text(encoding="utf-8"))
-                return DetectionResultMeta(
+                return SpikeSetMeta(
+                    source=str(payload.source or SOURCE_DETECTED),
+                    detector_name=str(payload.detector_name or "mad"),
                     group_key=str(payload.group_key or ""),
                     group_name=str(payload.group_name or ""),
                     preprocessing_pipeline=str(payload.preprocessing_pipeline or DEFAULT_PIPELINE_NAME),
                     threshold=float(payload.threshold),
                     adaptive_sigma=bool(payload.adaptive_sigma),
-                    detector_name=str(payload.detector_name or "mad"),
+                    clusters=payload.clusters(),
+                    source_file=str(payload.source_file or ""),
                 )
             except Exception as e:
                 ephyr_logger().debug(str(e))
-        return DetectionResultMeta()
+        return SpikeSetMeta()
 
-    def detection_result_label(self, result_dir: Path) -> str:
-        meta = self.read_detection_meta(result_dir)
-        return meta.display_label(fallback_name=Path(result_dir).name)
+    def spike_set_label(self, set_dir: Path) -> str:
+        meta = self.read_spike_set_meta(set_dir)
+        return meta.display_label(fallback_name=Path(set_dir).name)
 
-    def read_spikes_payload(self, result_dir: Path, sweep_idx: int) -> Optional[SpikesPayload]:
-        path = Path(result_dir) / f"{int(sweep_idx)}.spikes.json"
+    def read_spikes_payload(self, set_dir: Path, sweep_idx: int) -> Optional[SpikesPayload]:
+        path = Path(set_dir) / f"{int(sweep_idx)}.spikes.json"
         if not path.exists():
             return None
         try:
@@ -351,16 +422,16 @@ class SpikeUtilsBase(EphyrAddOnMixin):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(payload.model_dump_json(indent=2), encoding="utf-8")
 
-    def choose_result_dir_dialog(
+    def choose_spike_set_dialog(
         self,
         title: str,
         add_on_data_dir: Path,
         selected_dir: str = "",
-        label: str = "Detection method:",
+        label: str = "Spike set:",
     ) -> Optional[Path]:
-        dirs = self.list_detection_result_dirs(add_on_data_dir)
+        dirs = self.list_spike_set_dirs(add_on_data_dir)
         if not dirs:
-            QMessageBox.warning(None, title, "No detected spikes yet. Run Spike detection first.")
+            QMessageBox.warning(None, title, NO_SPIKE_SETS_MESSAGE)
             return None
         dialog = QDialog()
         dialog.setWindowTitle(title)
@@ -368,7 +439,7 @@ class SpikeUtilsBase(EphyrAddOnMixin):
         form = QFormLayout()
         combo = QComboBox()
         for path in dirs:
-            combo.addItem(self.detection_result_label(path), str(path))
+            combo.addItem(self.spike_set_label(path), str(path))
         if selected_dir:
             idx = combo.findData(selected_dir)
             combo.setCurrentIndex(max(0, idx))
@@ -387,16 +458,16 @@ class SpikeUtilsBase(EphyrAddOnMixin):
             return None
         return Path(str(combo.currentData()))
 
-    def choose_result_dirs_dialog(
+    def choose_spike_sets_dialog(
         self,
         title: str,
         add_on_data_dir: Path,
         selected_dirs: Optional[List[str]] = None,
-        label: str = "Detection methods:",
+        label: str = "Spike sets:",
     ) -> Optional[List[Path]]:
-        dirs = self.list_detection_result_dirs(add_on_data_dir)
+        dirs = self.list_spike_set_dirs(add_on_data_dir)
         if not dirs:
-            QMessageBox.warning(None, title, "No detected spikes yet. Run Spike detection first.")
+            QMessageBox.warning(None, title, NO_SPIKE_SETS_MESSAGE)
             return None
         preferred = {str(Path(p)) for p in (selected_dirs or []) if p}
         dialog = QDialog()
@@ -407,7 +478,7 @@ class SpikeUtilsBase(EphyrAddOnMixin):
         methods_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
         select_all = not preferred
         for path in dirs:
-            item = QListWidgetItem(self.detection_result_label(path))
+            item = QListWidgetItem(self.spike_set_label(path))
             item.setData(Qt.ItemDataRole.UserRole, str(path))
             item.setSelected(select_all or str(path) in preferred)
             methods_list.addItem(item)
@@ -433,16 +504,16 @@ class SpikeUtilsBase(EphyrAddOnMixin):
             if value:
                 selected.append(Path(str(value)))
         if not selected:
-            QMessageBox.warning(dialog, title, "Select at least one detection method.")
+            QMessageBox.warning(dialog, title, "Select at least one spike set.")
             return None
         return selected
 
-    def channels_for_detection_payload(
+    def channels_for_spikes_payload(
         self,
         payload: SpikesPayload,
         channel_groups: Optional[List[Any]] = None,
     ) -> List[int]:
-        """Channels belonging to the detection group (fallback: payload keys)."""
+        """Channels belonging to the set's channel group (fallback: payload keys)."""
         if channel_groups is not None and payload.group_key:
             resolved = self.resolve_groups_by_keys(
                 channel_groups,
@@ -457,11 +528,14 @@ class SpikeUtilsBase(EphyrAddOnMixin):
 
 __all__ = [
     "DEFAULT_PIPELINE_NAME",
-    "DETECTION_META_FILENAME",
-    "DETECTION_MODULE_NAME",
-    "DetectionResultMeta",
+    "NO_SPIKE_SETS_MESSAGE",
+    "SOURCE_DETECTED",
+    "SOURCE_IMPORTED",
+    "SPIKE_SETS_FOLDER_NAME",
+    "SPIKE_SET_META_FILENAME",
     "SpikeCandidate",
     "SpikePoint",
+    "SpikeSetMeta",
     "SpikesPayload",
     "SpikeUtilsBase",
     "detect_spikes_adaptive_mad",
@@ -469,5 +543,6 @@ __all__ = [
     "mad_sigma",
     "merge_spikes_global",
     "rolling_sigma_mad",
-    "safe_detection_dir_name",
+    "safe_detected_set_dir_name",
+    "safe_imported_set_dir_name",
 ]

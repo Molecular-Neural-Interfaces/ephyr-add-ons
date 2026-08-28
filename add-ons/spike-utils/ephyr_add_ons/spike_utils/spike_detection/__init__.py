@@ -37,15 +37,16 @@ from ephyr.core.add_ons.common.preprocessing import apply_single_step, enabled_s
 from ephyr.logger import ephyr_logger
 
 from ephyr_add_ons.spike_utils._common import (
-    DetectionResultMeta,
+    SOURCE_DETECTED,
     SpikePoint,
+    SpikeSetMeta,
     SpikesPayload,
     SpikeUtilsBase,
     detect_spikes_adaptive_mad,
     detect_spikes_mad,
     merge_spikes_global,
     rolling_sigma_mad,
-    safe_detection_dir_name,
+    safe_detected_set_dir_name,
 )
 
 # Keep peak RAM near one channel trace on long HD-MEA sweeps.
@@ -400,7 +401,7 @@ class SpikeDetectionAddOn(SpikeUtilsBase, BaseAddOn):
 
         gc.collect()
 
-        out_dir = add_on_data_dir / safe_detection_dir_name(
+        out_dir = self.spike_sets_dir(add_on_data_dir) / safe_detected_set_dir_name(
             params["pipeline"],
             threshold,
             adaptive_sigma,
@@ -408,6 +409,7 @@ class SpikeDetectionAddOn(SpikeUtilsBase, BaseAddOn):
         )
         payload = SpikesPayload(
             detector_name="adaptive_mad" if adaptive_sigma else "mad",
+            source=SOURCE_DETECTED,
             preprocessing_pipeline=params["pipeline"],
             threshold=float(threshold),
             sweep_idx=sweep_idx,
@@ -430,15 +432,17 @@ class SpikeDetectionAddOn(SpikeUtilsBase, BaseAddOn):
         output_path = out_dir / f"{sweep_idx}.spikes.json"
         try:
             self.save_spikes_payload(output_path, payload)
-            self.save_detection_meta(
+            self.save_spike_set_meta(
                 out_dir,
-                DetectionResultMeta(
+                SpikeSetMeta(
+                    source=SOURCE_DETECTED,
+                    detector_name=payload.detector_name,
                     group_key=payload.group_key,
                     group_name=payload.group_name,
                     preprocessing_pipeline=payload.preprocessing_pipeline,
                     threshold=payload.threshold,
                     adaptive_sigma=payload.adaptive_sigma,
-                    detector_name=payload.detector_name,
+                    clusters=payload.clusters(),
                 ),
             )
         except Exception as e:

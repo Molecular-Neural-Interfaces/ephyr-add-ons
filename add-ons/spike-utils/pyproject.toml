@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ephyr-spike-utils"
 version = "0.1.0"
-description = "Spike analysis toolkit for Ephyr: MAD detection, viewer overlays, navigation, aligned waveforms, and rasters."
+description = "Spike analysis toolkit for Ephyr: MAD detection, WEEGIT .spk import, viewer overlays, navigation, aligned waveforms, and rasters."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
@@ -27,6 +27,7 @@ namespaces = true
 
 [project.entry-points."ephyr.add_ons"]
 spike_detection = "ephyr_add_ons.spike_utils.spike_detection:SpikeDetectionAddOn"
+spike_importer = "ephyr_add_ons.spike_utils.spike_importer:SpikeImporterAddOn"
 spike_viewer = "ephyr_add_ons.spike_utils.spike_viewer:SpikeViewerAddOn"
 spike_navigation = "ephyr_add_ons.spike_utils.spike_navigation:SpikeNavigationAddOn"
 aligned_spikes_plot = "ephyr_add_ons.spike_utils.aligned_spikes_plot:AlignedSpikesPlotAddOn"

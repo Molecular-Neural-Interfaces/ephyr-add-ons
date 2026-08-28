@@ -1,9 +1,9 @@
 """Spike navigation add-on.
 
-Runnable. Opens a non-modal window where the user picks a detection result set
-and a channel, sees the spike count, and steps through spikes (arrows or a
-number field). Selecting a spike recenters the signal view on it, mirroring the
-event navigation behaviour.
+Runnable. Opens a non-modal window where the user picks a spike set (detected or
+imported), a channel and optionally a single cluster, sees the spike count, and
+steps through spikes (arrows or a number field). Selecting a spike recenters the
+signal view on it, mirroring the event navigation behaviour.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (
 from ephyr.core.add_ons.base import BaseAddOn
 from ephyr.logger import ephyr_logger
 
-from ephyr_add_ons.spike_utils._common import SpikePoint, SpikeUtilsBase
+from ephyr_add_ons.spike_utils._common import NO_SPIKE_SETS_MESSAGE, SpikePoint, SpikeUtilsBase
 
 
 class _SpikeNavigationWindow(QWidget):
@@ -45,12 +45,15 @@ class _SpikeNavigationWindow(QWidget):
         form = QFormLayout()
 
         self._dir_combo = QComboBox()
-        for path in self._add_on.list_detection_result_dirs(self._add_on_data_dir):
-            self._dir_combo.addItem(self._add_on.detection_result_label(path), str(path))
-        form.addRow("Detection method:", self._dir_combo)
+        for path in self._add_on.list_spike_set_dirs(self._add_on_data_dir):
+            self._dir_combo.addItem(self._add_on.spike_set_label(path), str(path))
+        form.addRow("Spike set:", self._dir_combo)
 
         self._channel_combo = QComboBox()
         form.addRow("Channel:", self._channel_combo)
+
+        self._cluster_combo = QComboBox()
+        form.addRow("Cluster:", self._cluster_combo)
 
         self._count_label = QLabel("No spikes")
         form.addRow("Spikes:", self._count_label)
@@ -72,6 +75,7 @@ class _SpikeNavigationWindow(QWidget):
 
         self._dir_combo.currentIndexChanged.connect(lambda _i: self._reload_channels())
         self._channel_combo.currentIndexChanged.connect(lambda _i: self._reload_spikes())
+        self._cluster_combo.currentIndexChanged.connect(lambda _i: self._reload_spikes())
         self._prev_btn.clicked.connect(lambda: self._step(-1))
         self._next_btn.clicked.connect(lambda: self._step(1))
         self._go_btn.clicked.connect(self._go_to_index)
@@ -89,22 +93,34 @@ class _SpikeNavigationWindow(QWidget):
 
     def _reload_channels(self) -> None:
         self._channel_combo.blockSignals(True)
+        self._cluster_combo.blockSignals(True)
         self._channel_combo.clear()
+        self._cluster_combo.clear()
         payload = self._load_payload()
         header = getattr(self._session_manager, "header", None)
         if payload is not None:
             for ch in sorted(payload.spikes_by_channel.keys()):
                 name = self._add_on.channel_name(header, int(ch)) if header is not None else f"ch{int(ch)}"
                 self._channel_combo.addItem(f"{name} [{ch}]", int(ch))
+            self._cluster_combo.addItem("All", None)
+            for cluster in payload.clusters():
+                self._cluster_combo.addItem(f"Cluster {cluster}" if cluster else "Unclustered", cluster)
+        self._cluster_combo.setEnabled(self._cluster_combo.count() > 2)
         self._channel_combo.blockSignals(False)
+        self._cluster_combo.blockSignals(False)
         self._reload_spikes()
 
     def _reload_spikes(self) -> None:
         payload = self._load_payload()
         channel = self._channel_combo.currentData()
+        cluster = self._cluster_combo.currentData()
         self._spikes = []
         if payload is not None and channel is not None:
-            self._spikes = list(payload.spikes_by_channel.get(int(channel), []))
+            self._spikes = [
+                spike
+                for spike in payload.spikes_by_channel.get(int(channel), [])
+                if cluster is None or int(spike.cluster) == int(cluster)
+            ]
         self._current_index = 0
         total = len(self._spikes)
         self._count_label.setText(f"{total} spike(s) on this channel / sweep")
@@ -159,10 +175,10 @@ class SpikeNavigationAddOn(SpikeUtilsBase, BaseAddOn):
 
     def run(self, session_manager, add_on_data_dir):
         add_on_data_dir = Path(add_on_data_dir)
-        if not self.list_detection_result_dirs(add_on_data_dir):
+        if not self.list_spike_set_dirs(add_on_data_dir):
             from PyQt6.QtWidgets import QMessageBox
 
-            QMessageBox.warning(None, "Spike navigation", "No detected spikes yet. Run Spike detection first.")
+            QMessageBox.warning(None, "Spike navigation", NO_SPIKE_SETS_MESSAGE)
             return
         try:
             if self._nav_window is not None:

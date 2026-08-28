@@ -44,11 +44,11 @@ class AlignedSpikesPlotAddOn(SpikeUtilsBase, BaseAddOn):
 
     def _ask_parameters(self, session_manager, header, add_on_data_dir: Path) -> Optional[dict]:
         params = self.load_params(add_on_data_dir)
-        selected_dir = self.choose_result_dir_dialog(
+        selected_dir = self.choose_spike_set_dialog(
             "Aligned spikes plot",
             add_on_data_dir,
             selected_dir=str(params.get("selected_dir", "")),
-            label="Detection method:",
+            label="Spike set:",
         )
         if selected_dir is None:
             return None
@@ -59,18 +59,18 @@ class AlignedSpikesPlotAddOn(SpikeUtilsBase, BaseAddOn):
             QMessageBox.warning(
                 None,
                 "Aligned spikes plot",
-                "No spikes for current sweep in selected detection method.",
+                "No spikes for current sweep in the selected spike set.",
             )
             return None
 
-        detection_channels = self.channels_for_detection_payload(
+        set_channels = self.channels_for_spikes_payload(
             payload,
             channel_groups=session_manager.gui_setup.channels_groups,
         )
-        if not detection_channels:
-            detection_channels = sorted(int(ch) for ch in payload.spikes_by_channel.keys())
-        if not detection_channels:
-            QMessageBox.warning(None, "Aligned spikes plot", "Selected detection has no channels.")
+        if not set_channels:
+            set_channels = sorted(int(ch) for ch in payload.spikes_by_channel.keys())
+        if not set_channels:
+            QMessageBox.warning(None, "Aligned spikes plot", "The selected spike set has no channels.")
             return None
 
         dialog = QDialog()
@@ -83,17 +83,17 @@ class AlignedSpikesPlotAddOn(SpikeUtilsBase, BaseAddOn):
         scroll_widget = QWidget()
         form = QFormLayout(scroll_widget)
 
-        meta = self.read_detection_meta(selected_dir)
+        meta = self.read_spike_set_meta(selected_dir)
         group_label = QLabel(
             (payload.group_name or meta.group_name or "Group").strip() or "Group"
         )
-        form.addRow("Detection group:", group_label)
+        form.addRow("Channels group:", group_label)
 
         channels_list = QListWidget()
         channels_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
         preferred = set(int(c) for c in (params.get("channel_indexes") or []))
         select_all = not preferred
-        for ch_idx in detection_channels:
+        for ch_idx in set_channels:
             ch_name = self.channel_name(header, int(ch_idx))
             item = QListWidgetItem(f"{ch_idx} [{ch_name}]")
             item.setData(Qt.ItemDataRole.UserRole, int(ch_idx))
@@ -219,6 +219,10 @@ class AlignedSpikesPlotAddOn(SpikeUtilsBase, BaseAddOn):
         pre_samples = max(1, int(round(params["pre_ms"] * sample_rate / 1000.0)))
         post_samples = max(1, int(round(params["post_ms"] * sample_rate / 1000.0)))
 
+        # A sorted set gets one mean waveform per cluster instead of a single one.
+        clusters = [cluster for cluster in payload.clusters() if cluster != 0]
+        split_by_cluster = len(clusters) > 1
+
         total = len(channels)
         rendered = 0
         for row_idx, channel_idx in enumerate(channels):
@@ -226,6 +230,7 @@ class AlignedSpikesPlotAddOn(SpikeUtilsBase, BaseAddOn):
             channel_name = self.channel_name(header, int(channel_idx))
             spikes = payload.spikes_by_channel.get(int(channel_idx), [])
             waveforms = []
+            waveform_clusters = []
             for spike in spikes:
                 spike_time_s = float(spike.time_ms) / 1000.0
                 if spike_time_s < window_start_s or spike_time_s > window_end_s:
@@ -236,17 +241,29 @@ class AlignedSpikesPlotAddOn(SpikeUtilsBase, BaseAddOn):
                 if s0 < 0 or s1 >= signal.size:
                     continue
                 waveforms.append(signal[s0:s1])
+                waveform_clusters.append(int(spike.cluster))
             if not waveforms:
                 yield {"progress": int(40 + ((row_idx + 1) / total) * 60), "message": f"No waveforms for channel {channel_idx}"}
                 continue
             waveforms_arr = np.asarray(waveforms, dtype=np.float64)
+            cluster_arr = np.asarray(waveform_clusters, dtype=np.int64)
             time_ms = np.linspace(-params["pre_ms"], params["post_ms"], waveforms_arr.shape[1])
             mean_waveform = np.mean(waveforms_arr, axis=0)
 
             fig, ax = plt.subplots(figsize=(8, 4))
             for waveform in waveforms_arr:
                 ax.plot(time_ms, waveform, color="grey", alpha=0.2, linewidth=0.6)
-            ax.plot(time_ms, mean_waveform, color="black", linewidth=1.6)
+            if split_by_cluster:
+                for cluster in sorted(set(waveform_clusters)):
+                    cluster_waveforms = waveforms_arr[cluster_arr == cluster]
+                    if not cluster_waveforms.size:
+                        continue
+                    label = f"Cluster {cluster} (n={cluster_waveforms.shape[0]})" if cluster \
+                        else f"Unclustered (n={cluster_waveforms.shape[0]})"
+                    ax.plot(time_ms, np.mean(cluster_waveforms, axis=0), linewidth=1.6, label=label)
+                ax.legend(loc="upper right", fontsize=8)
+            else:
+                ax.plot(time_ms, mean_waveform, color="black", linewidth=1.6)
             if params["middle_line"]:
                 ax.axvline(0.0, color="blue", linestyle="--", linewidth=0.8)
             ax.set_title(f"Aligned spikes {channel_name} (n={waveforms_arr.shape[0]})")
