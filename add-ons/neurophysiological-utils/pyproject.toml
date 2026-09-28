@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ephyr-neurophysiological-utils"
+version = "0.1.0"
+description = "Clinical neurophysiology tools for Ephyr, including a calibrated EEG paper grid."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    {name = "Aleksandr", email = "sasha.k.1618@gmail.com"},
+]
+dependencies = [
+]
+
+[project.urls]
+Homepage = "https://github.com/Molecular-Neural-Interfaces/ephyr-add-ons/tree/main/add-ons/neurophysiological-utils"
+Repository = "https://github.com/Molecular-Neural-Interfaces/ephyr-add-ons"
+Documentation = "https://github.com/Molecular-Neural-Interfaces/ephyr"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ephyr_add_ons*"]
+namespaces = true
+
+[project.entry-points."ephyr.add_ons"]
+eeg_grid = "ephyr_add_ons.neurophysiological_utils.eeg_grid:EEGGridAddOn"

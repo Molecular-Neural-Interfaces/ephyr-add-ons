@@ -14,14 +14,17 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import numpy as np
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QApplication,
     QComboBox,
-    QDialog,
     QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -94,29 +97,28 @@ def detect_above_threshold(
     return np.asarray(peaks, dtype=np.int64)
 
 
-class EventsDetectionAddOn(LabelingUtilsBase, BaseAddOn):
-    TRANSFORMATION = False
-    VIEWABLE = False
-    RUNNABLE = True
+class _EventsDetectionWindow(QWidget):
+    def __init__(self, add_on, session_manager, header, add_on_data_dir: Path, groups):
+        super().__init__()
+        self._add_on = add_on
+        self._session_manager = session_manager
+        self._header = header
+        self._add_on_data_dir = Path(add_on_data_dir)
 
-    def _ask_parameters(self, session_manager, header, add_on_data_dir: Path) -> Optional[dict]:
-        groups = self.ensure_non_aux_groups(session_manager, "Events detection")
-        if groups is None:
-            return None
-        common = self.load_common(add_on_data_dir)
-        params = self.load_params(add_on_data_dir)
+        common = add_on.load_common(self._add_on_data_dir)
+        params = add_on.load_params(self._add_on_data_dir)
 
-        dialog = QDialog()
-        dialog.setWindowTitle("Events detection")
-        dialog.setMinimumWidth(540)
-        dialog.setFixedHeight(620)
-        outer = QVBoxLayout(dialog)
+        self.setWindowTitle("Events detection")
+        self.setWindowFlags(Qt.WindowType.Window)
+        self.setMinimumWidth(540)
+        self.setMinimumHeight(620)
+        outer = QVBoxLayout(self)
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_widget = QWidget()
         form = QFormLayout(scroll_widget)
 
-        group_combo, channels_list = self.build_group_channel_selector(
+        self._group_combo, self._channels_list = add_on.build_group_channel_selector(
             form,
             groups,
             header,
@@ -124,112 +126,141 @@ class EventsDetectionAddOn(LabelingUtilsBase, BaseAddOn):
             preferred_channels=common.get("channel_indexes", []),
         )
 
-        pipeline_selector = PipelineSelector(
-            self.pipelines_path(add_on_data_dir),
+        self._pipeline_selector = PipelineSelector(
+            add_on.pipelines_path(self._add_on_data_dir),
             selected_name=str(params.get("pipeline", "raw")),
         )
-        form.addRow("Preprocessing pipeline:", pipeline_selector)
+        form.addRow("Preprocessing pipeline:", self._pipeline_selector)
 
-        mode_combo = QComboBox()
-        mode_combo.addItem("TTL", MODE_TTL)
-        mode_combo.addItem("Above threshold", MODE_ABOVE)
+        self._mode_combo = QComboBox()
+        self._mode_combo.addItem("TTL", MODE_TTL)
+        self._mode_combo.addItem("Above threshold", MODE_ABOVE)
         saved_mode = str(params.get("mode", MODE_TTL))
         if saved_mode in {"digital", "analog"}:
             saved_mode = MODE_ABOVE if saved_mode == "digital" else MODE_TTL
-        idx = mode_combo.findData(saved_mode)
-        mode_combo.setCurrentIndex(max(0, idx))
-        form.addRow("Detection mode:", mode_combo)
+        idx = self._mode_combo.findData(saved_mode)
+        self._mode_combo.setCurrentIndex(max(0, idx))
+        form.addRow("Detection mode:", self._mode_combo)
 
-        name_edit = QLineEdit(str(params.get("event_name", "")))
-        form.addRow("Event name:", name_edit)
+        self._name_edit = QLineEdit(str(params.get("event_name", "")))
+        form.addRow("Event name:", self._name_edit)
 
-        # TTL-specific
-        edge_combo = QComboBox()
-        edge_combo.addItem("Rising edge", EDGE_RISING)
-        edge_combo.addItem("Falling edge", EDGE_FALLING)
-        edge_idx = edge_combo.findData(str(params.get("edge", EDGE_RISING)))
-        edge_combo.setCurrentIndex(max(0, edge_idx))
-        form.addRow("TTL edge:", edge_combo)
+        self._edge_combo = QComboBox()
+        self._edge_combo.addItem("Rising edge", EDGE_RISING)
+        self._edge_combo.addItem("Falling edge", EDGE_FALLING)
+        edge_idx = self._edge_combo.findData(str(params.get("edge", EDGE_RISING)))
+        self._edge_combo.setCurrentIndex(max(0, edge_idx))
+        form.addRow("TTL edge:", self._edge_combo)
 
-        ttl_threshold_spin = QDoubleSpinBox()
-        ttl_threshold_spin.setDecimals(6)
-        ttl_threshold_spin.setRange(-1e9, 1e9)
-        ttl_threshold_spin.setValue(float(params.get("ttl_threshold", params.get("height", 0.5))))
-        form.addRow("TTL threshold:", ttl_threshold_spin)
+        self._ttl_threshold_spin = QDoubleSpinBox()
+        self._ttl_threshold_spin.setDecimals(6)
+        self._ttl_threshold_spin.setRange(-1e9, 1e9)
+        self._ttl_threshold_spin.setValue(float(params.get("ttl_threshold", params.get("height", 0.5))))
+        form.addRow("TTL threshold:", self._ttl_threshold_spin)
 
-        # Above-threshold specific
-        height_spin = QDoubleSpinBox()
-        height_spin.setDecimals(6)
-        height_spin.setRange(-1e9, 1e9)
-        height_spin.setValue(float(params.get("height", 50.0)))
-        form.addRow("Height (threshold):", height_spin)
+        self._height_spin = QDoubleSpinBox()
+        self._height_spin.setDecimals(6)
+        self._height_spin.setRange(-1e9, 1e9)
+        self._height_spin.setValue(float(params.get("height", 50.0)))
+        form.addRow("Height (threshold):", self._height_spin)
 
-        distance_spin = QDoubleSpinBox()
-        distance_spin.setDecimals(3)
-        distance_spin.setRange(0.0, 1e9)
-        distance_spin.setValue(float(params.get("distance_ms", 1.0)))
-        form.addRow("Min distance (ms):", distance_spin)
+        self._distance_spin = QDoubleSpinBox()
+        self._distance_spin.setDecimals(3)
+        self._distance_spin.setRange(0.0, 1e9)
+        self._distance_spin.setValue(float(params.get("distance_ms", 1.0)))
+        form.addRow("Min distance (ms):", self._distance_spin)
 
-        def _sync_mode_visibility() -> None:
-            is_ttl = str(mode_combo.currentData()) == MODE_TTL
-            edge_combo.setEnabled(is_ttl)
-            ttl_threshold_spin.setEnabled(is_ttl)
-            height_spin.setEnabled(not is_ttl)
-
-        mode_combo.currentIndexChanged.connect(lambda _i: _sync_mode_visibility())
-        _sync_mode_visibility()
+        self._mode_combo.currentIndexChanged.connect(lambda _i: self._sync_mode_visibility())
+        self._sync_mode_visibility()
 
         scroll_area.setWidget(scroll_widget)
         outer.addWidget(scroll_area)
+
+        self._status = QLabel("")
+        self._status.setWordWrap(True)
+        outer.addWidget(self._status)
+        self._progress = QProgressBar()
+        self._progress.setRange(0, 100)
+        self._progress.setValue(0)
+        outer.addWidget(self._progress)
+
         actions = QHBoxLayout()
-        btn_cancel = QPushButton("Cancel")
-        btn_run = QPushButton("Run")
+        btn_close = QPushButton("Close")
+        self._run_btn = QPushButton("Run")
         actions.addStretch(1)
-        actions.addWidget(btn_cancel)
-        actions.addWidget(btn_run)
+        actions.addWidget(btn_close)
+        actions.addWidget(self._run_btn)
         outer.addLayout(actions)
-        btn_cancel.clicked.connect(dialog.reject)
-        btn_run.clicked.connect(dialog.accept)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return None
+        btn_close.clicked.connect(self.close)
+        self._run_btn.clicked.connect(self._on_run)
 
-        channels = self.selected_channels(channels_list)
+    def _sync_mode_visibility(self) -> None:
+        is_ttl = str(self._mode_combo.currentData()) == MODE_TTL
+        self._edge_combo.setEnabled(is_ttl)
+        self._ttl_threshold_spin.setEnabled(is_ttl)
+        self._height_spin.setEnabled(not is_ttl)
+
+    def _set_status(self, progress: Optional[int], message: str) -> None:
+        self._status.setText(message)
+        if progress is not None:
+            self._progress.setValue(max(0, min(100, int(progress))))
+        QApplication.processEvents()
+
+    def _collect_params(self) -> Optional[dict]:
+        channels = self._add_on.selected_channels(self._channels_list)
         if not channels:
-            QMessageBox.warning(dialog, "Events detection", "Select at least one channel.")
+            QMessageBox.warning(self, "Events detection", "Select at least one channel.")
             return None
-        event_name = name_edit.text().strip()
+        event_name = self._name_edit.text().strip()
         if not event_name:
-            QMessageBox.warning(dialog, "Events detection", "Event name must not be empty.")
+            QMessageBox.warning(self, "Events detection", "Event name must not be empty.")
             return None
-        existing = {entry.name for entry in (session_manager.events_vocabulary or {}).values()}
+        existing = {entry.name for entry in (self._session_manager.events_vocabulary or {}).values()}
         if event_name in existing:
-            QMessageBox.warning(dialog, "Events detection", "Event name must be unique.")
+            QMessageBox.warning(self, "Events detection", "Event name must be unique.")
             return None
-
-        mode = str(mode_combo.currentData())
-        self.save_common(
-            add_on_data_dir,
-            {"group_idx": int(group_combo.currentData()), "channel_indexes": channels},
+        self._add_on.save_common(
+            self._add_on_data_dir,
+            {"group_idx": int(self._group_combo.currentData()), "channel_indexes": channels},
         )
         payload = {
-            "pipeline": pipeline_selector.current_pipeline_name(),
-            "mode": mode,
+            "pipeline": self._pipeline_selector.current_pipeline_name(),
+            "mode": str(self._mode_combo.currentData()),
             "event_name": event_name,
-            "edge": str(edge_combo.currentData()),
-            "ttl_threshold": float(ttl_threshold_spin.value()),
-            "height": float(height_spin.value()),
-            "distance_ms": float(distance_spin.value()),
+            "edge": str(self._edge_combo.currentData()),
+            "ttl_threshold": float(self._ttl_threshold_spin.value()),
+            "height": float(self._height_spin.value()),
+            "distance_ms": float(self._distance_spin.value()),
         }
-        self.save_params(add_on_data_dir, payload)
+        self._add_on.save_params(self._add_on_data_dir, payload)
         return {"channels": channels, **payload}
 
-    def run(self, session_manager, add_on_data_dir):
-        header = session_manager.header
-        add_on_data_dir = Path(add_on_data_dir)
-        params = self._ask_parameters(session_manager, header, add_on_data_dir)
+    def _on_run(self) -> None:
+        params = self._collect_params()
         if params is None:
             return
+        self._run_btn.setEnabled(False)
+        try:
+            for yielded in self._add_on.detect_events(
+                self._session_manager, self._add_on_data_dir, params, parent=self
+            ):
+                if isinstance(yielded, dict):
+                    self._set_status(yielded.get("progress"), str(yielded.get("message", "")))
+        finally:
+            self._run_btn.setEnabled(True)
 
+
+class EventsDetectionAddOn(LabelingUtilsBase, BaseAddOn):
+    TRANSFORMATION = False
+    VIEWABLE = False
+    RUNNABLE = True
+
+    def __init__(self):
+        self._window: Optional[_EventsDetectionWindow] = None
+
+    def detect_events(self, session_manager, add_on_data_dir: Path, params: dict, parent=None):
+        header = session_manager.header
+        add_on_data_dir = Path(add_on_data_dir)
         total_sweeps = int(header.number_of_sweeps)
         if total_sweeps <= 0:
             yield {"progress": 100, "message": "No sweeps to process"}
@@ -287,7 +318,7 @@ class EventsDetectionAddOn(LabelingUtilsBase, BaseAddOn):
 
         if not detected:
             QMessageBox.information(
-                None,
+                parent,
                 "Events detection",
                 "No events were detected. Vocabulary was not created.",
             )
@@ -296,7 +327,7 @@ class EventsDetectionAddOn(LabelingUtilsBase, BaseAddOn):
         n_detected = len(detected)
         if n_detected > CONFIRM_THRESHOLD:
             answer = QMessageBox.question(
-                None,
+                parent,
                 "Events detection",
                 f"Detected {n_detected} events. The interface may freeze. "
                 "Are you sure you want to continue with these detection parameters?",
@@ -317,3 +348,20 @@ class EventsDetectionAddOn(LabelingUtilsBase, BaseAddOn):
             yield {"progress": 100, "message": "Failed to add events"}
             return
         yield {"progress": 100, "message": f"Added {n_detected} '{params['event_name']}' events"}
+
+    def run(self, session_manager, add_on_data_dir):
+        header = session_manager.header
+        add_on_data_dir = Path(add_on_data_dir)
+        groups = self.ensure_non_aux_groups(session_manager, "Events detection")
+        if groups is None:
+            return False
+        try:
+            if self._window is not None:
+                self._window.close()
+        except Exception as e:
+            ephyr_logger().debug(str(e))
+        self._window = _EventsDetectionWindow(self, session_manager, header, add_on_data_dir, groups)
+        self._window.show()
+        self._window.raise_()
+        self._window.activateWindow()
+        return False

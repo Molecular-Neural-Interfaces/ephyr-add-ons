@@ -12,6 +12,12 @@
     "path": "add-ons/lfp-utils"
   },
   {
+    "label": "Neurophysiological utils",
+    "module_name": "ephyr-neurophysiological-utils",
+    "keywords": ["EEG", "clinical", "grid", "sensitivity", "sweep speed", "neurophysiology"],
+    "path": "add-ons/neurophysiological-utils"
+  },
+  {
     "label": "Signal utils",
     "module_name": "ephyr-signal-utils",
     "keywords": ["signal", "preprocessing", "PSD", "spectrogram", "Welch"],

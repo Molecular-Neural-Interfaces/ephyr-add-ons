@@ -179,7 +179,7 @@ class SpikeNavigationAddOn(SpikeUtilsBase, BaseAddOn):
             from PyQt6.QtWidgets import QMessageBox
 
             QMessageBox.warning(None, "Spike navigation", NO_SPIKE_SETS_MESSAGE)
-            return
+            return False
         try:
             if self._nav_window is not None:
                 self._nav_window.close()
@@ -189,3 +189,4 @@ class SpikeNavigationAddOn(SpikeUtilsBase, BaseAddOn):
         self._nav_window.show()
         self._nav_window.raise_()
         self._nav_window.activateWindow()
+        return False

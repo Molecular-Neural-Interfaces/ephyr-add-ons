@@ -12,5 +12,6 @@ Install packages from **Add-ons → Manage** in the Ephyr GUI. This repository i
 
 - [Labeling utils](add-ons/labeling-utils) — detect events and append them to the session vocabulary
 - [Local field potential utils](add-ons/lfp-utils) — current-source density (CSD) visualization on the signal panel
+- [Neurophysiological utils](add-ons/neurophysiological-utils) — calibrated clinical EEG scaling and timing grid
 - [Signal utils](add-ons/signal-utils) — preprocessing comparison, power spectral density, and spectrograms
 - [Spike utils](add-ons/spike-utils) — spike detection, viewing, navigation, aligned waveforms, and rasters

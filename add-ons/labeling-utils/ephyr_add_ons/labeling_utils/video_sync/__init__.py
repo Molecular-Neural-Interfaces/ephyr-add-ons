@@ -16,9 +16,10 @@ from pathlib import Path
 from typing import List, Optional
 
 import numpy as np
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QApplication,
     QComboBox,
-    QDialog,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
@@ -26,6 +27,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -66,6 +68,7 @@ class VideoSyncAddOn(LabelingUtilsBase, BaseAddOn):
 
     def __init__(self):
         self._window: Optional[VideoSyncWindow] = None
+        self._settings_window: Optional[QWidget] = None
 
     def _guess_nwb_path(self, session_manager, header) -> str:
         try:
@@ -79,15 +82,16 @@ class VideoSyncAddOn(LabelingUtilsBase, BaseAddOn):
             ephyr_logger().debug(str(e))
         return ""
 
-    def _ask_parameters(self, session_manager, header, add_on_data_dir: Path) -> Optional[dict]:
+    def _ask_parameters(self, session_manager, header, add_on_data_dir: Path) -> Optional[QWidget]:
         params = self.load_params(add_on_data_dir)
         common = self.load_common(add_on_data_dir)
         groups = self.channel_groups(session_manager)
 
-        dialog = QDialog()
+        dialog = QWidget()
         dialog.setWindowTitle("Video sync")
+        dialog.setWindowFlags(Qt.WindowType.Window)
         dialog.setMinimumWidth(560)
-        dialog.setFixedHeight(640)
+        dialog.setMinimumHeight(640)
         outer = QVBoxLayout(dialog)
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
@@ -268,89 +272,106 @@ class VideoSyncAddOn(LabelingUtilsBase, BaseAddOn):
 
         scroll_area.setWidget(scroll_widget)
         outer.addWidget(scroll_area)
+        status = QLabel("")
+        status.setWordWrap(True)
+        outer.addWidget(status)
+        progress = QProgressBar()
+        progress.setRange(0, 100)
+        progress.setValue(0)
+        outer.addWidget(progress)
         actions = QHBoxLayout()
-        btn_cancel = QPushButton("Cancel")
+        btn_close = QPushButton("Close")
         btn_run = QPushButton("Run")
         actions.addStretch(1)
-        actions.addWidget(btn_cancel)
+        actions.addWidget(btn_close)
         actions.addWidget(btn_run)
         outer.addLayout(actions)
-        btn_cancel.clicked.connect(dialog.reject)
-        btn_run.clicked.connect(dialog.accept)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return None
+        btn_close.clicked.connect(dialog.close)
 
-        source_kind = str(source_combo.currentData())
-        if source_kind == SOURCE_NWB:
-            nwb_path = nwb_edit.text().strip()
-            series_location = str(series_combo.currentData() or "")
-            if not nwb_path or not Path(nwb_path).is_file():
-                QMessageBox.warning(dialog, "Video sync", "Select a valid NWB file.")
+        def _collect_params() -> Optional[dict]:
+            source_kind = str(source_combo.currentData())
+            if source_kind == SOURCE_NWB:
+                nwb_path = nwb_edit.text().strip()
+                series_location = str(series_combo.currentData() or "")
+                if not nwb_path or not Path(nwb_path).is_file():
+                    QMessageBox.warning(dialog, "Video sync", "Select a valid NWB file.")
+                    return None
+                if not series_location:
+                    QMessageBox.warning(dialog, "Video sync", "Select an imaging series.")
+                    return None
+                payload = {
+                    "source_kind": SOURCE_NWB,
+                    "nwb_path": nwb_path,
+                    "series_location": series_location,
+                    "video_path": video_edit.text().strip() or str(params.get("video_path", "")),
+                    "edge": str(params.get("edge", EDGE_RISING)),
+                    "ttl_threshold": float(params.get("ttl_threshold", 0.5)),
+                    "ttl_distance_ms": float(params.get("ttl_distance_ms", 1.0)),
+                    "flash_sensitivity": float(params.get("flash_sensitivity", 2.5)),
+                    "flash_distance_ms": float(params.get("flash_distance_ms", 50.0)),
+                    "flash_sample_fps": float(params.get("flash_sample_fps", 0.0)),
+                    "mode": str(params.get("mode", MODE_AUTO)),
+                }
+                self.save_params(add_on_data_dir, payload)
+                return {
+                    "source_kind": SOURCE_NWB,
+                    "nwb_path": nwb_path,
+                    "series_location": series_location,
+                }
+
+            if not groups or group_combo is None or channels_list is None:
+                QMessageBox.warning(dialog, "Video sync", "Channel groups are required for video mode.")
                 return None
-            if not series_location:
-                QMessageBox.warning(dialog, "Video sync", "Select an imaging series.")
+
+            video_path = video_edit.text().strip()
+            if not video_path or not Path(video_path).is_file():
+                QMessageBox.warning(dialog, "Video sync", "Select a valid video file.")
                 return None
+
+            channels = self.selected_channels(channels_list)
+            if not channels:
+                QMessageBox.warning(dialog, "Video sync", "Select a TTL channel.")
+                return None
+            channel = int(channels[0])
+
+            try:
+                open_video_meta(video_path)
+            except Exception as e:
+                QMessageBox.warning(dialog, "Video sync", f"Cannot open video:\n{e}")
+                return None
+
+            self.save_common(
+                add_on_data_dir,
+                {"group_idx": int(group_combo.currentData()), "channel_indexes": [channel]},
+            )
             payload = {
-                "source_kind": SOURCE_NWB,
-                "nwb_path": nwb_path,
-                "series_location": series_location,
-                # Keep last video settings so switching modes does not wipe them.
-                "video_path": video_edit.text().strip() or str(params.get("video_path", "")),
-                "edge": str(params.get("edge", EDGE_RISING)),
-                "ttl_threshold": float(params.get("ttl_threshold", 0.5)),
-                "ttl_distance_ms": float(params.get("ttl_distance_ms", 1.0)),
-                "flash_sensitivity": float(params.get("flash_sensitivity", 2.5)),
-                "flash_distance_ms": float(params.get("flash_distance_ms", 50.0)),
-                "flash_sample_fps": float(params.get("flash_sample_fps", 0.0)),
-                "mode": str(params.get("mode", MODE_AUTO)),
+                "source_kind": SOURCE_VIDEO,
+                "video_path": video_path,
+                "edge": str(edge_combo.currentData()),
+                "ttl_threshold": float(ttl_threshold_spin.value()),
+                "ttl_distance_ms": float(ttl_distance_spin.value()),
+                "flash_sensitivity": float(flash_sens_spin.value()),
+                "flash_distance_ms": float(flash_distance_spin.value()),
+                "flash_sample_fps": float(sample_fps_spin.value()),
+                "mode": str(mode_combo.currentData()),
+                "nwb_path": nwb_edit.text().strip() or str(params.get("nwb_path", default_nwb)),
+                "series_location": str(series_combo.currentData() or params.get("series_location", "")),
             }
             self.save_params(add_on_data_dir, payload)
-            return {
-                "source_kind": SOURCE_NWB,
-                "nwb_path": nwb_path,
-                "series_location": series_location,
-            }
+            return {"channel": channel, **payload}
 
-        if not groups or group_combo is None or channels_list is None:
-            QMessageBox.warning(dialog, "Video sync", "Channel groups are required for video mode.")
-            return None
+        def _on_run() -> None:
+            collected = _collect_params()
+            if collected is None:
+                return
+            btn_run.setEnabled(False)
+            try:
+                self._start_sync(session_manager, add_on_data_dir, collected, status, progress)
+            finally:
+                btn_run.setEnabled(True)
 
-        video_path = video_edit.text().strip()
-        if not video_path or not Path(video_path).is_file():
-            QMessageBox.warning(dialog, "Video sync", "Select a valid video file.")
-            return None
-
-        channels = self.selected_channels(channels_list)
-        if not channels:
-            QMessageBox.warning(dialog, "Video sync", "Select a TTL channel.")
-            return None
-        channel = int(channels[0])
-
-        try:
-            open_video_meta(video_path)
-        except Exception as e:
-            QMessageBox.warning(dialog, "Video sync", f"Cannot open video:\n{e}")
-            return None
-
-        self.save_common(
-            add_on_data_dir,
-            {"group_idx": int(group_combo.currentData()), "channel_indexes": [channel]},
-        )
-        payload = {
-            "source_kind": SOURCE_VIDEO,
-            "video_path": video_path,
-            "edge": str(edge_combo.currentData()),
-            "ttl_threshold": float(ttl_threshold_spin.value()),
-            "ttl_distance_ms": float(ttl_distance_spin.value()),
-            "flash_sensitivity": float(flash_sens_spin.value()),
-            "flash_distance_ms": float(flash_distance_spin.value()),
-            "flash_sample_fps": float(sample_fps_spin.value()),
-            "mode": str(mode_combo.currentData()),
-            "nwb_path": nwb_edit.text().strip() or str(params.get("nwb_path", default_nwb)),
-            "series_location": str(series_combo.currentData() or params.get("series_location", "")),
-        }
-        self.save_params(add_on_data_dir, payload)
-        return {"channel": channel, **payload}
+        btn_run.clicked.connect(_on_run)
+        return dialog
 
     def _open_window(
         self,
@@ -585,23 +606,45 @@ class VideoSyncAddOn(LabelingUtilsBase, BaseAddOn):
         )
         yield {"progress": 100, "message": msg}
 
-    def run(self, session_manager, add_on_data_dir):
+    def _start_sync(self, session_manager, add_on_data_dir: Path, params: dict, status, progress):
         header = session_manager.header
-        add_on_data_dir = Path(add_on_data_dir)
-        params = self._ask_parameters(session_manager, header, add_on_data_dir)
-        if params is None:
-            return
-
         sweep_idx = int(session_manager.gui_setup.current_sweep_idx)
         sample_rate = float(header.sample_rate)
         sweep_points = int(header.number_of_points_per_sweep[sweep_idx])
         signal_duration_ms = (sweep_points / sample_rate) * 1000.0 if sample_rate > 0 else 0.0
-
         source_kind = str(params.get("source_kind", SOURCE_VIDEO))
-        if source_kind == SOURCE_NWB:
-            yield from self._run_nwb(session_manager, add_on_data_dir, params, signal_duration_ms)
-        else:
-            yield from self._run_video(session_manager, add_on_data_dir, params, signal_duration_ms)
+        worker = (
+            self._run_nwb(session_manager, add_on_data_dir, params, signal_duration_ms)
+            if source_kind == SOURCE_NWB
+            else self._run_video(session_manager, add_on_data_dir, params, signal_duration_ms)
+        )
+        if worker is None:
+            return
+        for yielded in worker:
+            if isinstance(yielded, dict):
+                message = str(yielded.get("message", ""))
+                value = yielded.get("progress")
+                if message:
+                    status.setText(message)
+                if value is not None:
+                    progress.setValue(max(0, min(100, int(value))))
+                QApplication.processEvents()
+
+    def run(self, session_manager, add_on_data_dir):
+        header = session_manager.header
+        add_on_data_dir = Path(add_on_data_dir)
+        try:
+            if self._settings_window is not None:
+                self._settings_window.close()
+        except Exception as e:
+            ephyr_logger().debug(str(e))
+        self._settings_window = self._ask_parameters(session_manager, header, add_on_data_dir)
+        if self._settings_window is None:
+            return False
+        self._settings_window.show()
+        self._settings_window.raise_()
+        self._settings_window.activateWindow()
+        return False
 
 
 __all__ = ["VideoSyncAddOn"]
