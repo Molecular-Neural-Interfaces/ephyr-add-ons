@@ -30,6 +30,7 @@ MINOR_INTERVAL_MS = 200.0
 MAJOR_INTERVAL_MS = 1000.0
 MM_PER_INCH = 25.4
 FALLBACK_DPI = 96.0
+PAPER_BACKGROUND = QColor("#FFFEE0")
 
 
 def pixels_per_mm(widget: QWidget) -> float:
@@ -363,11 +364,9 @@ class EEGGridAddOn(EphyrAddOnMixin, BaseAddOn):
             visible_events,
             visible_periods,
             channels_setup,
-            signal_widget,
             signal_width,
             draw_area_height,
             bg_color,
-            grid_color,
             signal_color,
             text_color,
             axis_color,
@@ -383,6 +382,7 @@ class EEGGridAddOn(EphyrAddOnMixin, BaseAddOn):
                 non_aux_only=True,
                 fallback_all=False,
             )
+            selected_ids = {id(group) for group in selected_groups}
             selected_channels = {
                 int(channel_idx)
                 for group in selected_groups
@@ -393,8 +393,28 @@ class EEGGridAddOn(EphyrAddOnMixin, BaseAddOn):
                 for channel_idx, rect in channel_rects
                 if int(channel_idx) in selected_channels
             ]
-            if not rects:
+            group_rects = list(getattr(signal_widget, "_group_layout_rects", []) or [])
+            paper_rects = [
+                group_rects[idx]
+                for idx, group in enumerate(channel_groups or [])
+                if id(group) in selected_ids
+                and idx < len(group_rects)
+                and group_rects[idx].width() > 0
+                and group_rects[idx].height() > 0
+            ]
+            if not paper_rects:
+                paper_rects = rects
+            if not paper_rects and not rects:
                 return
+
+            for rect in paper_rects:
+                painter.fillRect(rect, PAPER_BACKGROUND)
+
+            # The fill sits above the panel's zero lines, so redraw them on the paper.
+            painter.setPen(QPen(grid_color, 2, Qt.PenStyle.DotLine))
+            for rect in rects:
+                zero_y = rect.top() + rect.height() // 2
+                painter.drawLine(rect.left(), zero_y, rect.right(), zero_y)
 
             minor_pen = QPen(QColor(80, 80, 80), 1, Qt.PenStyle.DashLine)
             major_pen = QPen(QColor(80, 80, 80), 2, Qt.PenStyle.DashLine)
