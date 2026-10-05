@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
+    QMessageBox,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
@@ -227,12 +228,24 @@ class CSDAddOn(EphyrAddOnMixin, BaseAddOn):
 
         reset_selected = {"value": False}
 
+        def _require_groups() -> bool:
+            if self.selected_group_keys(groups_list):
+                return True
+            QMessageBox.warning(dialog, "CSD", "Select at least one channel group.")
+            return False
+
+        def _on_apply() -> None:
+            if _require_groups():
+                dialog.accept()
+
         def _on_reset() -> None:
+            if not _require_groups():
+                return
             reset_selected["value"] = True
             dialog.accept()
 
         btn_cancel.clicked.connect(dialog.reject)
-        btn_ok.clicked.connect(dialog.accept)
+        btn_ok.clicked.connect(_on_apply)
         btn_reset.clicked.connect(_on_reset)
 
         if dialog.exec() != QDialog.DialogCode.Accepted:
