@@ -268,7 +268,8 @@ class AlignedSpikesPlotAddOn(SpikeUtilsBase, BaseAddOn):
                 ax.axvline(0.0, color="blue", linestyle="--", linewidth=0.8)
             ax.set_title(f"Aligned spikes {channel_name} (n={waveforms_arr.shape[0]})")
             ax.set_xlabel("Time (ms)")
-            ax.set_ylabel("Amplitude (uV)")
+            unit = header.channel_unit_display(int(channel_idx))
+            ax.set_ylabel(f"Amplitude ({unit})" if unit else "Amplitude")
             if params["grid"]:
                 ax.grid(True, alpha=0.25)
             fig.tight_layout()

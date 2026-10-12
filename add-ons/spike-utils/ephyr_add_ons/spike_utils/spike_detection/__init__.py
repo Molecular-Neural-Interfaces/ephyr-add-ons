@@ -122,8 +122,8 @@ class SpikeDetectionAddOn(SpikeUtilsBase, BaseAddOn):
         sigma_floor = QDoubleSpinBox()
         sigma_floor.setRange(0.0, 1_000_000.0)
         sigma_floor.setDecimals(6)
-        sigma_floor.setValue(float(params.get("sigma_floor_uv", 2.0)))
-        form.addRow("Sigma floor (uV):", sigma_floor)
+        sigma_floor.setValue(float(params.get("sigma_floor", 2.0)))
+        form.addRow(f"Sigma floor ({header.common_unit_display() or 'signal units'}):", sigma_floor)
         sigma_smooth = QSpinBox()
         sigma_smooth.setRange(1, 1000)
         sigma_smooth.setValue(int(params.get("sigma_smooth_windows", 3)))
@@ -196,7 +196,7 @@ class SpikeDetectionAddOn(SpikeUtilsBase, BaseAddOn):
         sigma_params = {
             "window_ms": float(sigma_window.value()),
             "step_ms": float(sigma_step.value()),
-            "sigma_floor_uv": float(sigma_floor.value()),
+            "sigma_floor": float(sigma_floor.value()),
             "smooth_windows": int(sigma_smooth.value()),
         }
 
@@ -219,7 +219,7 @@ class SpikeDetectionAddOn(SpikeUtilsBase, BaseAddOn):
                 "merge_window_ms": float(merge_window.value()),
                 "sigma_window_ms": sigma_params["window_ms"],
                 "sigma_step_ms": sigma_params["step_ms"],
-                "sigma_floor_uv": sigma_params["sigma_floor_uv"],
+                "sigma_floor": sigma_params["sigma_floor"],
                 "sigma_smooth_windows": sigma_params["smooth_windows"],
             },
         )
@@ -264,7 +264,7 @@ class SpikeDetectionAddOn(SpikeUtilsBase, BaseAddOn):
         sigma_params: dict,
         valid_mask: np.ndarray,
     ) -> List[SpikePoint]:
-        sigma_floor = float(sigma_params["sigma_floor_uv"])
+        sigma_floor = float(sigma_params["sigma_floor"])
         sigma_t = None
         if adaptive_sigma:
             sigma_t = rolling_sigma_mad(
@@ -272,7 +272,7 @@ class SpikeDetectionAddOn(SpikeUtilsBase, BaseAddOn):
                 sample_rate,
                 window_ms=float(sigma_params["window_ms"]),
                 step_ms=float(sigma_params["step_ms"]),
-                sigma_floor_uv=sigma_floor,
+                sigma_floor=sigma_floor,
                 smooth_windows=int(sigma_params["smooth_windows"]),
                 mask=valid_mask if valid_mask.size == signal.size else None,
             )

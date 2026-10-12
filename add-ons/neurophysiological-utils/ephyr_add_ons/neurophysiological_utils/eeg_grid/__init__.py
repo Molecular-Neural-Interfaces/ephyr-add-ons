@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 
 from ephyr.core.add_ons.base import BaseAddOn, ViewEntitiesZIndexEnum
 from ephyr.core.add_ons.common.mixin import EphyrAddOnMixin
+from ephyr.core.header import SignalUnitEnum
 from ephyr.logger import ephyr_logger
 
 
@@ -234,7 +235,10 @@ class EEGGridAddOn(EphyrAddOnMixin, BaseAddOn):
             non_aux_only=True,
             fallback_all=False,
         )
+        header = session_manager.header
         missing_geometry: List[str] = []
+        # EEG sensitivity is defined in µV/mm, so only voltage channels can be calibrated.
+        skipped_channels: List[int] = []
         cell_widths: List[float] = []
         for group in selected_groups:
             cell_size = group_cell_size(signal_widget, group)
@@ -243,16 +247,22 @@ class EEGGridAddOn(EphyrAddOnMixin, BaseAddOn):
                 continue
             cell_width, cell_height = cell_size
             cell_widths.append(cell_width)
-            scale = voltage_scale_for_sensitivity(cell_height, px_per_mm, sensitivity)
+            scale_uv = voltage_scale_for_sensitivity(cell_height, px_per_mm, sensitivity)
             buckets = defaultdict(list)
             for channel_idx in getattr(group, "channel_indexes", []) or []:
+                channel_unit = header.channel_unit(int(channel_idx)) if header is not None else None
+                factor = SignalUnitEnum.MICROVOLT.factor_to(channel_unit) if channel_unit is not None else None
+                if factor is None:
+                    skipped_channels.append(int(channel_idx))
+                    continue
                 setup = gui_setup.channels_setup.get(int(channel_idx))
                 buckets[(
+                    scale_uv * factor,
                     float(getattr(setup, "y_offset", 0.0)),
                     str(getattr(setup, "color", "#000000")),
                     str(getattr(setup, "info", "")),
                 )].append(int(channel_idx))
-            for (y_offset, color, info), channel_indexes in buckets.items():
+            for (scale, y_offset, color, info), channel_indexes in buckets.items():
                 session_manager.set_channels_setup(
                     channel_indexes,
                     scale=scale,
@@ -285,6 +295,12 @@ class EEGGridAddOn(EphyrAddOnMixin, BaseAddOn):
             warnings.append(
                 "Sensitivity was not changed for groups without visible cells: "
                 + ", ".join(missing_geometry)
+                + "."
+            )
+        if skipped_channels:
+            warnings.append(
+                "Sensitivity is defined in µV/mm, so it was not applied to channels without a voltage unit: "
+                + ", ".join(str(idx) for idx in skipped_channels)
                 + "."
             )
         if ordered_widths[-1] - ordered_widths[0] > 1.0:
@@ -325,7 +341,7 @@ class EEGGridAddOn(EphyrAddOnMixin, BaseAddOn):
         self,
         add_on_data_dir: Path,
         processed_data,
-        voltage_scale,
+        amplitude_scale,
         start_point,
         duration_ms,
         start_time_ms,
@@ -339,6 +355,7 @@ class EEGGridAddOn(EphyrAddOnMixin, BaseAddOn):
         visible_periods,
         channel_groups,
         channels_setup,
+        channel_units,
         painter: QPainter,
         signal_widget: QWidget,
         channel_rects: List[Tuple[int, QRect]],
@@ -352,7 +369,7 @@ class EEGGridAddOn(EphyrAddOnMixin, BaseAddOn):
     ):
         del (
             processed_data,
-            voltage_scale,
+            amplitude_scale,
             start_point,
             start_time_ms,
             end_time_ms,
@@ -364,6 +381,7 @@ class EEGGridAddOn(EphyrAddOnMixin, BaseAddOn):
             visible_events,
             visible_periods,
             channels_setup,
+            channel_units,
             signal_width,
             draw_area_height,
             bg_color,

@@ -267,7 +267,7 @@ class PreprocessingPlotAddOn(SignalUtilsBase, BaseAddOn):
                 plot_len = min(signal.size, local_time.size)
                 ax.plot(local_time[:plot_len], signal[:plot_len], linewidth=0.7, color="#1b4dff")
                 ax.set_xlim(start_second, end_second)
-                ax.set_ylabel("uV")
+                ax.set_ylabel(header.channel_unit_display(int(channel_idx)))
                 ax.grid(True, alpha=0.25)
                 ax.set_title(f"{channel_name} | pipeline: {name}")
             axes[-1].set_xlabel("Time (s)")

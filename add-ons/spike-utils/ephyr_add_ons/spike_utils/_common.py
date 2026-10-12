@@ -146,13 +146,13 @@ class SpikeCandidate:
 
 # ---- Detection algorithms ----
 
-def mad_sigma(signal_1d: np.ndarray, sigma_floor_uv: float = 0.0) -> float:
+def mad_sigma(signal_1d: np.ndarray, sigma_floor: float = 0.0) -> float:
     x = np.asarray(signal_1d, dtype=np.float64)
     if x.size == 0:
-        return float(sigma_floor_uv)
+        return float(sigma_floor)
     med = np.median(x)
     mad = np.median(np.abs(x - med))
-    return max(float(sigma_floor_uv), float(mad / 0.6745 if mad > 0 else 0.0))
+    return max(float(sigma_floor), float(mad / 0.6745 if mad > 0 else 0.0))
 
 
 def rolling_sigma_mad(
@@ -160,7 +160,7 @@ def rolling_sigma_mad(
     fs: float,
     window_ms: float = 500.0,
     step_ms: float = 100.0,
-    sigma_floor_uv: float = 2.0,
+    sigma_floor: float = 2.0,
     smooth_windows: int = 3,
     mask: Optional[np.ndarray] = None,
     min_valid_fraction: float = 0.20,
@@ -178,7 +178,7 @@ def rolling_sigma_mad(
     h = max(1, int(round(float(step_ms) * float(fs) / 1000.0)))
     centers: List[int] = []
     sigma_vals: List[float] = []
-    prev_sigma = float(sigma_floor_uv)
+    prev_sigma = float(sigma_floor)
     min_valid_n = max(8, int(round(float(min_valid_fraction) * w)))
     for start in range(0, max(1, n - w + 1), h):
         seg = x[start:start + w]
@@ -187,11 +187,11 @@ def rolling_sigma_mad(
             med = np.median(seg_valid)
             mad = np.median(np.abs(seg_valid - med))
             sigma = mad / 0.6745 if mad > 0 else 0.0
-            prev_sigma = max(float(sigma), float(sigma_floor_uv))
+            prev_sigma = max(float(sigma), float(sigma_floor))
         centers.append(start + w // 2)
         sigma_vals.append(prev_sigma)
     if not centers:
-        return np.full(n, float(sigma_floor_uv), dtype=np.float64)
+        return np.full(n, float(sigma_floor), dtype=np.float64)
     sigma_arr = np.asarray(sigma_vals, dtype=np.float64)
     if int(smooth_windows) > 1 and sigma_arr.size > 1:
         k = int(max(1, smooth_windows))
@@ -209,7 +209,7 @@ def rolling_sigma_mad(
             left=sigma_arr[0],
             right=sigma_arr[-1],
         )
-    global_sigma = max(float(sigma_floor_uv), float(np.median(sigma_arr)))
+    global_sigma = max(float(sigma_floor), float(np.median(sigma_arr)))
     lock_n = max(0, min(int(round(w / 2)), n))
     if lock_n > 0:
         sigma_full[:lock_n] = np.maximum(sigma_full[:lock_n], global_sigma)
@@ -232,10 +232,10 @@ def detect_spikes_mad(
     multiplier: float = 6.0,
     min_distance_ms: float = 1.0,
     detect_positive: bool = False,
-    sigma_floor_uv: float = 0.0,
+    sigma_floor: float = 0.0,
 ) -> List[SpikeCandidate]:
     x = np.asarray(signal_1d, dtype=np.float64)
-    sigma = mad_sigma(x, sigma_floor_uv=sigma_floor_uv)
+    sigma = mad_sigma(x, sigma_floor=sigma_floor)
     threshold = float(multiplier) * sigma
     distance = max(1, int(round(float(min_distance_ms) * float(fs) / 1000.0)))
     if detect_positive:
@@ -252,18 +252,18 @@ def detect_spikes_adaptive_mad(
     min_distance_ms: float = 1.0,
     detect_positive: bool = False,
     sigma_t: Optional[np.ndarray] = None,
-    sigma_floor_uv: float = 2.0,
+    sigma_floor: float = 2.0,
 ) -> List[SpikeCandidate]:
     x = np.asarray(signal_1d, dtype=np.float64)
     if x.size == 0:
         return []
     sigma_arr = (
-        rolling_sigma_mad(x, fs, sigma_floor_uv=sigma_floor_uv)
+        rolling_sigma_mad(x, fs, sigma_floor=sigma_floor)
         if sigma_t is None
         else np.asarray(sigma_t, dtype=np.float64)
     )
     if sigma_arr.size != x.size:
-        sigma_arr = np.full(x.size, mad_sigma(x, sigma_floor_uv=sigma_floor_uv), dtype=np.float64)
+        sigma_arr = np.full(x.size, mad_sigma(x, sigma_floor=sigma_floor), dtype=np.float64)
     thr = float(multiplier) * sigma_arr
     distance = max(1, int(round(float(min_distance_ms) * float(fs) / 1000.0)))
     mask = x > thr if detect_positive else (-x > thr)

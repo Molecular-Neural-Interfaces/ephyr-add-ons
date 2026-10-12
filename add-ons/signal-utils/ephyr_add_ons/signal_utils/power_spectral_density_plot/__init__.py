@@ -270,7 +270,9 @@ class PowerSpectralDensityPlotAddOn(SignalUtilsBase, BaseAddOn):
             plotted += 1
 
         ax.set_xlabel("Frequency (Hz)")
-        ax.set_ylabel("PSD (dB/Hz)" if use_db else "PSD (uV^2/Hz)")
+        unit = header.common_unit_display(int(ch) for ch in channels)
+        power_unit = f"{unit}^2/Hz" if unit else "units^2/Hz"
+        ax.set_ylabel(f"PSD (dB re 1 {power_unit})" if use_db else f"PSD ({power_unit})")
         ax.set_xlim(params["freq_min_hz"], params["freq_max_hz"])
         ax.grid(True, alpha=0.25)
         if plotted:

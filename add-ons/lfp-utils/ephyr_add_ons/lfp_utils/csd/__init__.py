@@ -436,7 +436,7 @@ class CSDAddOn(EphyrAddOnMixin, BaseAddOn):
         add_on_data_dir: Path,
         # DATA
         processed_data: Dict[int, np.ndarray[np.float64]],
-        voltage_scale: float,
+        amplitude_scale: float,
         start_point: int,
         duration_ms: float,
         start_time_ms: float,
@@ -450,6 +450,7 @@ class CSDAddOn(EphyrAddOnMixin, BaseAddOn):
         visible_periods: List[Any],
         channel_groups: List[Any],
         channels_setup: Dict[int, Any],
+        channel_units: Dict[int, str],
         # UI
         painter: QPainter,
         signal_widget: QWidget,

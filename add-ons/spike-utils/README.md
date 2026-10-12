@@ -30,7 +30,7 @@ Channels are processed **one at a time** (load → preprocess → detect → rel
 | Threshold multiplier | Multiplier of the MAD/sigma estimate |
 | Use adaptive rolling sigma | Toggle adaptive vs global sigma |
 | Sigma window / step (ms) | Rolling window and step for adaptive sigma |
-| Sigma floor (uV) | Lower bound for the sigma estimate |
+| Sigma floor | Lower bound for the sigma estimate, in the channel unit (e.g. µV) |
 | Sigma smooth windows | Smoothing length over rolling sigma windows |
 | Detect downward / upward spikes | Polarity selection |
 | Merge window (ms) | Merge nearby detections into one spike |
