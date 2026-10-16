@@ -443,7 +443,7 @@ class CSDAddOn(EphyrAddOnMixin, BaseAddOn):
         end_time_ms: float,
         sample_rate: float,
         axis_duration_ms: float,
-        sweep_idx: int,
+        segment_idx: int,
         visible_channel_indexes: List[int],
         channel_names: List[str],
         visible_events: List[Any],

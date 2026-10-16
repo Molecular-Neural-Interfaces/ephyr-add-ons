@@ -8,16 +8,16 @@ Every tool in this package works with **spike sets**. A set is one directory in 
 
 ```
 add_ons/data/spike_sets/{set_name}/spike_set_meta.json
-add_ons/data/spike_sets/{set_name}/{sweep_idx}.spikes.json
+add_ons/data/spike_sets/{set_name}/{segment_idx}.spikes.json
 ```
 
-`spike_set_meta.json` describes the set: `source` (`detected` or `imported`), `detector_name`, the channel group and detection parameters for detected sets, the list of `clusters`, and `source_file` / `created_at` for imported sets. Each `{sweep_idx}.spikes.json` holds `spikes_by_channel`, mapping a channel index to spikes with `sample_idx`, `time_ms`, `value`, `polarity` and `cluster`.
+`spike_set_meta.json` describes the set: `source` (`detected` or `imported`), `detector_name`, the channel group and detection parameters for detected sets, the list of `clusters`, and `source_file` / `created_at` for imported sets. Each `{segment_idx}.spikes.json` holds `spikes_by_channel`, mapping a channel index to spikes with `sample_idx`, `time_ms`, `value`, `polarity` and `cluster`. Older payloads that still have `sweep_idx` are accepted on load.
 
 The **method** identifies a whole set (the same method re-run with another threshold is still that method), while the **cluster** is a per-spike sorting label inside the set (`0` means unclustered). Tools that can show clusters do so only when a set contains more than one.
 
 ## Spike detection (`spike_detection`)
 
-**Runnable.** Detects spikes on the full current sweep for the selected channels using a preprocessing pipeline and MAD-based thresholding (global or adaptive rolling sigma). Results are saved per sweep as a spike set with `source: detected`.
+**Runnable.** Detects spikes on the full current segment for the selected channels using a preprocessing pipeline and MAD-based thresholding (global or adaptive rolling sigma). Results are saved per segment as a spike set with `source: detected`.
 
 Channels are processed **one at a time** (load → preprocess → detect → release) so HD-MEA runs do not keep a full `(n_channels × n_samples)` float64 matrix in RAM.
 
@@ -59,9 +59,9 @@ Timestamps are `float64` in every known writer while the original format note me
 
 ### Mapping and validation
 
-- `sample_idx = round(timestamp) - 1`, `time_ms = sample_idx / sample_rate × 1000`; channel and sweep numbers also become 0-based.
+- `sample_idx = round(timestamp) - 1`, `time_ms = sample_idx / sample_rate × 1000`; channel numbers become 0-based; `.spk` sweep numbers (1-based) map to physical segments.
 - Amplitudes are stored as `value = -abs(amplitude)` with `polarity: negative`, because WEEGIT records the magnitude of a negative peak.
-- Nothing is written unless the file matches the experiment header. The import is aborted with the full list of problems when the data block size does not match the declared spike count, when a channel or sweep number is out of range, or when a spike sits beyond the end of its sweep.
+- Nothing is written unless the file matches the active source. The import is aborted with the full list of problems when the data block size does not match the declared spike count, when a channel or sweep number is out of range, or when a spike sits beyond the end of its physical segment.
 - A file name that differs from the converted recording name is only a confirmable warning.
 
 ## Spike viewer (`spike_viewer`)

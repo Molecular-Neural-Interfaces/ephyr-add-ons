@@ -82,14 +82,14 @@ class _SpikeNavigationWindow(QWidget):
 
         self._reload_channels()
 
-    def _current_sweep_idx(self) -> int:
-        return int(self._session_manager.gui_setup.current_sweep_idx)
+    def _current_segment_idx(self) -> int:
+        return int(self._session_manager.gui_setup.current_segment_idx)
 
     def _load_payload(self):
         selected = self._dir_combo.currentData()
         if not selected:
             return None
-        return self._add_on.read_spikes_payload(Path(str(selected)), self._current_sweep_idx())
+        return self._add_on.read_spikes_payload(Path(str(selected)), self._current_segment_idx())
 
     def _reload_channels(self) -> None:
         self._channel_combo.blockSignals(True)
@@ -97,7 +97,7 @@ class _SpikeNavigationWindow(QWidget):
         self._channel_combo.clear()
         self._cluster_combo.clear()
         payload = self._load_payload()
-        header = getattr(self._session_manager, "header", None)
+        header = getattr(self._session_manager, "source_view", None)
         if payload is not None:
             for ch in sorted(payload.spikes_by_channel.keys()):
                 name = self._add_on.channel_name(header, int(ch)) if header is not None else f"ch{int(ch)}"
@@ -123,7 +123,7 @@ class _SpikeNavigationWindow(QWidget):
             ]
         self._current_index = 0
         total = len(self._spikes)
-        self._count_label.setText(f"{total} spike(s) on this channel / sweep")
+        self._count_label.setText(f"{total} spike(s) on this channel / segment")
         self._index_spin.setRange(0, max(0, total - 1))
         self._index_spin.setValue(0)
         if total:
@@ -147,15 +147,15 @@ class _SpikeNavigationWindow(QWidget):
             return
         spike = self._spikes[index]
         try:
-            header = self._session_manager.header
+            header = self._session_manager.source_view
             sample_rate = float(header.sample_rate)
             duration_ms = float(self._session_manager.gui_setup.duration_ms)
-            sweep_idx = self._current_sweep_idx()
-            sweep_points = int(header.number_of_points_per_sweep[sweep_idx])
+            segment_idx = self._current_segment_idx()
+            segment_points = int(header.segment_points[segment_idx])
             target_samples = int((spike.time_ms / 1000.0) * sample_rate)
             half_window = int((duration_ms / 2000.0) * sample_rate)
             new_start = max(0, target_samples - half_window)
-            max_start = max(0, sweep_points - int((duration_ms / 1000.0) * sample_rate))
+            max_start = max(0, segment_points - int((duration_ms / 1000.0) * sample_rate))
             new_start = min(new_start, max_start)
             self._session_manager.set_start_point(int(new_start))
             self._count_label.setText(

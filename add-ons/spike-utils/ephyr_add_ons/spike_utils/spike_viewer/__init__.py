@@ -82,10 +82,10 @@ class SpikeViewerAddOn(SpikeUtilsBase, BaseAddOn):
         self.save_params(add_on_data_dir, {"selected_dirs": selected_dirs})
         self._payload_cache.clear()
 
-        sweep_idx = int(session_manager.gui_setup.current_sweep_idx)
+        segment_idx = int(session_manager.gui_setup.current_segment_idx)
         total_spikes = 0
         for path in selected:
-            payload = self.read_spikes_payload(path, sweep_idx)
+            payload = self.read_spikes_payload(path, segment_idx)
             if payload is not None:
                 total_spikes += sum(len(v) for v in payload.spikes_by_channel.values())
         yield {
@@ -96,11 +96,11 @@ class SpikeViewerAddOn(SpikeUtilsBase, BaseAddOn):
     def _load_payloads(
         self,
         selected_dirs: List[str],
-        sweep_idx: int,
+        segment_idx: int,
     ) -> List[Tuple[Path, SpikesPayload]]:
         loaded: List[Tuple[Path, SpikesPayload]] = []
         for selected_dir in selected_dirs:
-            path = Path(selected_dir) / f"{int(sweep_idx)}.spikes.json"
+            path = Path(selected_dir) / f"{int(segment_idx)}.spikes.json"
             if not path.exists():
                 continue
             try:
@@ -113,7 +113,7 @@ class SpikeViewerAddOn(SpikeUtilsBase, BaseAddOn):
             if cached is not None and cached[0] == mtime:
                 loaded.append((Path(selected_dir), cached[1]))
                 continue
-            payload = self.read_spikes_payload(Path(selected_dir), int(sweep_idx))
+            payload = self.read_spikes_payload(Path(selected_dir), int(segment_idx))
             if payload is None:
                 continue
             self._payload_cache[cache_key] = (mtime, payload)
@@ -131,7 +131,7 @@ class SpikeViewerAddOn(SpikeUtilsBase, BaseAddOn):
         end_time_ms: float,
         sample_rate: float,
         axis_duration_ms: float,
-        sweep_idx: int,
+        segment_idx: int,
         visible_channel_indexes: List[int],
         channel_names: List[str],
         visible_events: List[Any],
@@ -162,7 +162,7 @@ class SpikeViewerAddOn(SpikeUtilsBase, BaseAddOn):
         if not selected_dirs:
             return
 
-        loaded = self._load_payloads(selected_dirs, int(sweep_idx))
+        loaded = self._load_payloads(selected_dirs, int(segment_idx))
         if not loaded:
             return
 

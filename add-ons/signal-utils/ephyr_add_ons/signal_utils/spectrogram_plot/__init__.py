@@ -71,17 +71,17 @@ class SpectrogramPlotAddOn(SignalUtilsBase, BaseAddOn):
         )
         form.addRow("Pipeline:", pipeline_selector)
 
-        sweep_duration_ms = self.sweep_duration_ms(session_manager, header)
+        segment_duration_ms = self.segment_duration_ms(session_manager, header)
         default_from, default_to = self.default_window_ms(session_manager, header)
         window_from_spin = QDoubleSpinBox()
-        window_from_spin.setRange(0.0, max(0.0, sweep_duration_ms))
+        window_from_spin.setRange(0.0, max(0.0, segment_duration_ms))
         window_from_spin.setDecimals(3)
-        window_from_spin.setValue(max(0.0, min(float(params.get("window_from_ms", default_from)), sweep_duration_ms)))
+        window_from_spin.setValue(max(0.0, min(float(params.get("window_from_ms", default_from)), segment_duration_ms)))
         form.addRow("Window from (ms):", window_from_spin)
         window_to_spin = QDoubleSpinBox()
-        window_to_spin.setRange(0.0, max(0.0, sweep_duration_ms))
+        window_to_spin.setRange(0.0, max(0.0, segment_duration_ms))
         window_to_spin.setDecimals(3)
-        window_to_spin.setValue(max(0.0, min(float(params.get("window_to_ms", default_to)), sweep_duration_ms)))
+        window_to_spin.setValue(max(0.0, min(float(params.get("window_to_ms", default_to)), segment_duration_ms)))
         form.addRow("Window to (ms):", window_to_spin)
 
         nyq = float(header.sample_rate) / 2.0
@@ -199,19 +199,19 @@ class SpectrogramPlotAddOn(SignalUtilsBase, BaseAddOn):
 
     def run(self, session_manager, add_on_data_dir):
         add_on_data_dir = Path(add_on_data_dir)
-        header = session_manager.header
+        header = session_manager.source_view
         params = self._ask_parameters(session_manager, header, add_on_data_dir)
         if params is None:
             return
 
-        sweep_idx = int(session_manager.gui_setup.current_sweep_idx)
+        segment_idx = int(session_manager.gui_setup.current_segment_idx)
         sample_rate = float(header.sample_rate)
         start_sample, end_sample, start_second, end_second, n_samples = self.resolve_window_samples(
             session_manager, header, params["window_from_ms"], params["window_to_ms"]
         )
         channels = params["channels"]
         raw_matrix = self.channel_matrix_from_session(
-            session_manager, channels, sweep_idx, start_sample, end_sample, sample_rate
+            session_manager, channels, segment_idx, start_sample, end_sample, sample_rate
         )
 
         store = read_pipeline_store(self.pipelines_path(add_on_data_dir))
@@ -224,7 +224,7 @@ class SpectrogramPlotAddOn(SignalUtilsBase, BaseAddOn):
             session_manager,
             n_samples=n_samples,
             sample_rate=sample_rate,
-            sweep_idx=sweep_idx,
+            segment_idx=segment_idx,
             start_second=start_second,
             end_second=end_second,
             selection=params["selection"],

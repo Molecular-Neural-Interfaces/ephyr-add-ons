@@ -144,13 +144,14 @@ def read_spk_file(path: Path) -> SpkContent:
     )
 
 
-def validate_against_header(content: SpkContent, header) -> List[str]:
-    """Everything that makes the file unusable for this experiment."""
+def validate_against_view(content: SpkContent, view) -> List[str]:
+    """Everything that makes the file unusable for this Record. .spk sweep numbers map to physical segments."""
     problems: List[str] = []
 
-    number_of_channels = int(header.number_of_channels)
-    number_of_sweeps = int(header.number_of_sweeps)
-    points_per_sweep = [int(points) for points in header.number_of_points_per_sweep]
+    number_of_channels = int(view.number_of_channels)
+    physical = list(view.physical_segments)
+    number_of_sweeps = len(physical)
+    points_per_sweep = [int(segment.number_of_samples) for segment in physical]
 
     min_channel = int(content.channels.min())
     max_channel = int(content.channels.max())
@@ -158,7 +159,7 @@ def validate_against_header(content: SpkContent, header) -> List[str]:
         problems.append(f"Channel numbers must be 1-based, but the file contains {min_channel}.")
     if max_channel > number_of_channels:
         problems.append(
-            f"The file references channel {max_channel}, while the experiment has "
+            f"The file references channel {max_channel}, while the Record has "
             f"{number_of_channels} channels."
         )
 
@@ -168,8 +169,8 @@ def validate_against_header(content: SpkContent, header) -> List[str]:
         problems.append(f"Sweep numbers must be 1-based, but the file contains {min_sweep}.")
     if max_sweep > number_of_sweeps:
         problems.append(
-            f"The file references sweep {max_sweep}, while the experiment has "
-            f"{number_of_sweeps} sweep(s)."
+            f"The file references sweep {max_sweep}, while the Record has "
+            f"{number_of_sweeps} segment(s)."
         )
 
     sample_indexes = np.rint(content.timestamps).astype(np.int64) - 1
@@ -179,16 +180,16 @@ def validate_against_header(content: SpkContent, header) -> List[str]:
             f"{float(content.timestamps.min())}."
         )
     for sweep_number in np.unique(content.sweeps):
-        sweep_idx = int(sweep_number) - 1
-        if not (0 <= sweep_idx < len(points_per_sweep)):
+        segment_idx = int(sweep_number) - 1
+        if not (0 <= segment_idx < len(points_per_sweep)):
             continue
         sweep_mask = content.sweeps == sweep_number
         largest = int(sample_indexes[sweep_mask].max())
-        sweep_points = points_per_sweep[sweep_idx]
-        if largest >= sweep_points:
+        segment_points = points_per_sweep[segment_idx]
+        if largest >= segment_points:
             problems.append(
                 f"Sweep {int(sweep_number)}: a spike sits at sample {largest}, "
-                f"while the sweep has only {sweep_points} points."
+                f"while the sweep has only {segment_points} points."
             )
 
     return problems
@@ -262,7 +263,7 @@ class SpikeImporterAddOn(SpikeUtilsBase, BaseAddOn):
         imported = 0
 
         for sweep_number in np.unique(content.sweeps):
-            sweep_idx = int(sweep_number) - 1
+            segment_idx = int(sweep_number) - 1
             sweep_mask = content.sweeps == sweep_number
             spikes_by_channel: Dict[int, List[SpikePoint]] = {}
             for channel_number in np.unique(content.channels[sweep_mask]):
@@ -287,11 +288,11 @@ class SpikeImporterAddOn(SpikeUtilsBase, BaseAddOn):
                 spikes_by_channel[int(channel_number) - 1] = spikes
                 imported += len(spikes)
 
-            payloads[sweep_idx] = SpikesPayload(
+            payloads[segment_idx] = SpikesPayload(
                 detector_name=content.method_name,
                 source=SOURCE_IMPORTED,
                 threshold=0.0,
-                sweep_idx=sweep_idx,
+                segment_idx=segment_idx,
                 sample_rate=sample_rate,
                 adaptive_sigma=False,
                 detect_positive=False,
@@ -303,7 +304,7 @@ class SpikeImporterAddOn(SpikeUtilsBase, BaseAddOn):
         return payloads, imported
 
     def run(self, session_manager, add_on_data_dir):
-        header = session_manager.header
+        header = session_manager.source_view
         add_on_data_dir = Path(add_on_data_dir)
         params = self._ask_parameters(add_on_data_dir)
         if params is None:
@@ -318,24 +319,29 @@ class SpikeImporterAddOn(SpikeUtilsBase, BaseAddOn):
             QMessageBox.critical(None, "Spike importer", f"Could not read {spk_path.name}:\n\n{exc}")
             return
 
-        problems = validate_against_header(content, header)
+        problems = validate_against_view(content, header)
         if problems:
             QMessageBox.critical(
                 None,
                 "Spike importer",
-                f"{spk_path.name} does not match this experiment, nothing was imported:\n\n"
+                f"{spk_path.name} does not match this Record, nothing was imported:\n\n"
                 + "\n".join(f"• {problem}" for problem in problems),
             )
             return
 
         # A different recording name is suspicious but legitimate (renamed files).
-        recording_name = str(getattr(header, "name_before_conversion", "") or "").strip()
+        record = getattr(session_manager, "record", None)
+        recording_name = ""
+        if record is not None and record.inputs:
+            recording_name = str(record.inputs[0].root_name or "").strip()
+        if not recording_name:
+            recording_name = str(getattr(header, "record_name", "") or "").strip()
         spk_stem = spk_path.name[: -len(".spk")] if spk_path.name.endswith(".spk") else spk_path.stem
         if recording_name and spk_stem and Path(recording_name).stem != spk_stem:
             answer = QMessageBox.question(
                 None,
                 "Spike importer",
-                f"The file is named '{spk_stem}', while the experiment was converted from "
+                f"The file is named '{spk_stem}', while the Record came from "
                 f"'{recording_name}'.\n\nImport anyway?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
@@ -353,11 +359,11 @@ class SpikeImporterAddOn(SpikeUtilsBase, BaseAddOn):
         )
         clusters = sorted({int(cluster) for cluster in np.unique(content.clusters)})
         try:
-            for done, (sweep_idx, payload) in enumerate(sorted(payloads.items()), start=1):
-                self.save_spikes_payload(out_dir / f"{sweep_idx}.spikes.json", payload)
+            for done, (segment_idx, payload) in enumerate(sorted(payloads.items()), start=1):
+                self.save_spikes_payload(out_dir / f"{segment_idx}.spikes.json", payload)
                 yield {
                     "progress": int(40 + (done / len(payloads)) * 55),
-                    "message": f"Saved sweep {sweep_idx} ({done}/{len(payloads)})",
+                    "message": f"Saved segment {segment_idx} ({done}/{len(payloads)})",
                 }
             self.save_spike_set_meta(
                 out_dir,
@@ -378,7 +384,7 @@ class SpikeImporterAddOn(SpikeUtilsBase, BaseAddOn):
         ephyr_logger().info(
             f"Imported {imported} spikes from {spk_path} "
             f"(method '{content.method_name}', {content.timestamp_dtype} timestamps, "
-            f"{len(payloads)} sweep(s), {len(real_clusters)} cluster(s)) into {out_dir}"
+            f"{len(payloads)} segment(s), {len(real_clusters)} cluster(s)) into {out_dir}"
         )
         yield {
             "progress": 100,

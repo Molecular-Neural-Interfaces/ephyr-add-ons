@@ -11,7 +11,7 @@ events are found, the user must confirm before adding them.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import numpy as np
 from PyQt6.QtCore import Qt
@@ -102,7 +102,7 @@ class _EventsDetectionWindow(QWidget):
         super().__init__()
         self._add_on = add_on
         self._session_manager = session_manager
-        self._header = header
+        self._view = header
         self._add_on_data_dir = Path(add_on_data_dir)
 
         common = add_on.load_common(self._add_on_data_dir)
@@ -259,14 +259,15 @@ class EventsDetectionAddOn(LabelingUtilsBase, BaseAddOn):
         self._window: Optional[_EventsDetectionWindow] = None
 
     def detect_events(self, session_manager, add_on_data_dir: Path, params: dict, parent=None):
-        header = session_manager.header
+        view = session_manager.source_view
         add_on_data_dir = Path(add_on_data_dir)
-        total_sweeps = int(header.number_of_sweeps)
-        if total_sweeps <= 0:
-            yield {"progress": 100, "message": "No sweeps to process"}
+        physical = list(view.physical_segments) if view is not None else []
+        total_segments = len(physical)
+        if total_segments <= 0:
+            yield {"progress": 100, "message": "No segments to process"}
             return
 
-        sample_rate = float(header.sample_rate)
+        sample_rate = float(view.sample_rate)
         channels = params["channels"]
         pipeline = read_pipeline_store(self.pipelines_path(add_on_data_dir)).get(params["pipeline"])
         mode = str(params["mode"])
@@ -276,15 +277,18 @@ class EventsDetectionAddOn(LabelingUtilsBase, BaseAddOn):
             else 1
         )
 
-        detected: List[Tuple[int, float]] = []
-        for sweep_idx in range(total_sweeps):
-            sweep_points = int(header.number_of_points_per_sweep[sweep_idx])
+        detected: List[float] = []
+        for segment_idx, segment in enumerate(physical):
+            segment_points = int(segment.number_of_samples)
             yield {
-                "progress": int((sweep_idx / total_sweeps) * 90),
-                "message": f"Preprocessing pipeline '{params['pipeline']}' on sweep {sweep_idx + 1}/{total_sweeps}",
+                "progress": int((segment_idx / total_segments) * 90),
+                "message": (
+                    f"Preprocessing pipeline '{params['pipeline']}' on segment "
+                    f"{segment_idx + 1}/{total_segments}"
+                ),
             }
-            matrix = self.channel_matrix_from_session(
-                session_manager, channels, sweep_idx, 0, sweep_points, sample_rate
+            matrix = self.channel_matrix_from_physical_segment(
+                session_manager, channels, segment_idx, 0, segment_points, sample_rate
             )
             processed = apply_preprocessing_pipeline(matrix, sample_rate, pipeline)
             processed = np.asarray(processed, dtype=np.float64)
@@ -309,11 +313,11 @@ class EventsDetectionAddOn(LabelingUtilsBase, BaseAddOn):
                     ephyr_logger().debug(str(e))
                     continue
                 for peak_sample in peaks:
-                    time_ms = (float(peak_sample) * 1000.0) / sample_rate
-                    detected.append((sweep_idx, float(time_ms)))
+                    time_in_segment_ms = (float(peak_sample) * 1000.0) / sample_rate
+                    detected.append(float(segment.t_start_ms) + time_in_segment_ms)
             yield {
-                "progress": int(((sweep_idx + 1) / total_sweeps) * 90),
-                "message": f"Sweep {sweep_idx + 1}/{total_sweeps}: {len(detected)} events so far",
+                "progress": int(((segment_idx + 1) / total_segments) * 90),
+                "message": f"Segment {segment_idx + 1}/{total_segments}: {len(detected)} events so far",
             }
 
         if not detected:
@@ -341,8 +345,7 @@ class EventsDetectionAddOn(LabelingUtilsBase, BaseAddOn):
         yield {"progress": 95, "message": f"Adding {n_detected} events..."}
         try:
             event_name_id = session_manager.add_event_vocabulary(params["event_name"])
-            events_specs = [(event_name_id, sweep_idx, time_ms) for sweep_idx, time_ms in detected]
-            session_manager.add_events(events_specs)
+            session_manager.add_events([(event_name_id, t_ms) for t_ms in detected])
         except Exception as e:
             ephyr_logger().debug(str(e))
             yield {"progress": 100, "message": "Failed to add events"}
@@ -350,7 +353,7 @@ class EventsDetectionAddOn(LabelingUtilsBase, BaseAddOn):
         yield {"progress": 100, "message": f"Added {n_detected} '{params['event_name']}' events"}
 
     def run(self, session_manager, add_on_data_dir):
-        header = session_manager.header
+        header = session_manager.source_view
         add_on_data_dir = Path(add_on_data_dir)
         groups = self.ensure_non_aux_groups(session_manager, "Events detection")
         if groups is None:

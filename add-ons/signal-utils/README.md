@@ -7,7 +7,7 @@ Shared controls across plot add-ons:
 | Field | Role |
 |-------|------|
 | Channel group / Channels | Non-auxiliary group and channels to analyze |
-| Window from / to (ms) | Time window within the current sweep |
+| Window from / to (ms) | Time window within the current segment |
 | Select events / Events action / Window before & after (ms) | Include or ignore samples around named events |
 | Select periods / Periods action | Include or ignore named periods |
 | Plot image | Whether to open a matplotlib figure after the run |

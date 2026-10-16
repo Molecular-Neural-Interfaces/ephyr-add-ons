@@ -70,12 +70,11 @@ class VideoSyncAddOn(LabelingUtilsBase, BaseAddOn):
         self._window: Optional[VideoSyncWindow] = None
         self._settings_window: Optional[QWidget] = None
 
-    def _guess_nwb_path(self, session_manager, header) -> str:
+    def _guess_nwb_path(self, session_manager, view=None) -> str:
         try:
             from ephyr.converter.channel_order import resolve_source_path
 
-            folder = getattr(session_manager, "ephyr_experiment_folder", None)
-            path = resolve_source_path(folder, header)
+            path = resolve_source_path(getattr(session_manager, "original_source_path", None))
             if path is not None and path.is_file() and path.suffix.lower() == ".nwb":
                 return str(path)
         except Exception as e:
@@ -416,7 +415,7 @@ class VideoSyncAddOn(LabelingUtilsBase, BaseAddOn):
                 NwbFrameSource,
                 build_timestamp_mapping,
                 electrical_starting_time_s,
-                ephys_location_from_header,
+                ephys_location_from_view,
                 list_imaging_series,
                 meta_from_imaging_info,
             )
@@ -438,7 +437,7 @@ class VideoSyncAddOn(LabelingUtilsBase, BaseAddOn):
             if info is None:
                 raise ValueError(f"Imaging series not found: {series_location}")
             meta = meta_from_imaging_info(nwb_path, info)
-            preferred = ephys_location_from_header(session_manager.header)
+            preferred = ephys_location_from_view(session_manager.source_view)
             ephys_start = electrical_starting_time_s(nwb_path, preferred_location=preferred)
             if ephys_start is None:
                 ephys_start = 0.0
@@ -482,10 +481,10 @@ class VideoSyncAddOn(LabelingUtilsBase, BaseAddOn):
             )
             return
 
-        header = session_manager.header
+        header = session_manager.source_view
         sample_rate = float(header.sample_rate)
-        sweep_idx = int(session_manager.gui_setup.current_sweep_idx)
-        sweep_points = int(header.number_of_points_per_sweep[sweep_idx])
+        segment_idx = int(session_manager.gui_setup.current_segment_idx)
+        segment_points = int(header.segment_points[segment_idx])
         channel = int(params["channel"])
         video_path = str(params["video_path"])
         mode = str(params.get("mode", MODE_AUTO))
@@ -505,7 +504,7 @@ class VideoSyncAddOn(LabelingUtilsBase, BaseAddOn):
         )
         try:
             matrix = self.channel_matrix_from_session(
-                session_manager, [channel], sweep_idx, 0, sweep_points, sample_rate
+                session_manager, [channel], segment_idx, 0, segment_points, sample_rate
             )
             signal = np.asarray(matrix[0], dtype=np.float64)
             peak_samples = detect_ttl_edges(
@@ -607,11 +606,11 @@ class VideoSyncAddOn(LabelingUtilsBase, BaseAddOn):
         yield {"progress": 100, "message": msg}
 
     def _start_sync(self, session_manager, add_on_data_dir: Path, params: dict, status, progress):
-        header = session_manager.header
-        sweep_idx = int(session_manager.gui_setup.current_sweep_idx)
+        header = session_manager.source_view
+        segment_idx = int(session_manager.gui_setup.current_segment_idx)
         sample_rate = float(header.sample_rate)
-        sweep_points = int(header.number_of_points_per_sweep[sweep_idx])
-        signal_duration_ms = (sweep_points / sample_rate) * 1000.0 if sample_rate > 0 else 0.0
+        segment_points = int(header.segment_points[segment_idx])
+        signal_duration_ms = (segment_points / sample_rate) * 1000.0 if sample_rate > 0 else 0.0
         source_kind = str(params.get("source_kind", SOURCE_VIDEO))
         worker = (
             self._run_nwb(session_manager, add_on_data_dir, params, signal_duration_ms)
@@ -631,7 +630,7 @@ class VideoSyncAddOn(LabelingUtilsBase, BaseAddOn):
                 QApplication.processEvents()
 
     def run(self, session_manager, add_on_data_dir):
-        header = session_manager.header
+        header = session_manager.source_view
         add_on_data_dir = Path(add_on_data_dir)
         try:
             if self._settings_window is not None:

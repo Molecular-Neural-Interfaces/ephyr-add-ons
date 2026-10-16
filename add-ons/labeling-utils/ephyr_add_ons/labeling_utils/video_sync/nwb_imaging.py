@@ -225,10 +225,11 @@ def build_timestamp_mapping(
     return TimeMapping(pairs=pairs)
 
 
-def ephys_location_from_header(header) -> str:
-    name = str(getattr(header, "name_before_conversion", "") or "")
+def ephys_location_from_view(view) -> str:
+    """NWB electrical-series path guessed from the active source name."""
+    name = str(getattr(view, "source_name", "") or getattr(view, "name_before_conversion", "") or "")
     if ":" not in name:
-        return ""
+        return name
     return name.split(":", 1)[1].strip()
 
 

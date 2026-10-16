@@ -53,13 +53,13 @@ class AlignedSpikesPlotAddOn(SpikeUtilsBase, BaseAddOn):
         if selected_dir is None:
             return None
 
-        sweep_idx = int(session_manager.gui_setup.current_sweep_idx)
-        payload = self.read_spikes_payload(selected_dir, sweep_idx)
+        segment_idx = int(session_manager.gui_setup.current_segment_idx)
+        payload = self.read_spikes_payload(selected_dir, segment_idx)
         if payload is None:
             QMessageBox.warning(
                 None,
                 "Aligned spikes plot",
-                "No spikes for current sweep in the selected spike set.",
+                "No spikes for current segment in the selected spike set.",
             )
             return None
 
@@ -102,20 +102,20 @@ class AlignedSpikesPlotAddOn(SpikeUtilsBase, BaseAddOn):
         form.addRow("Channels:", channels_list)
 
         sample_rate = float(header.sample_rate)
-        sweep_points = int(header.number_of_points_per_sweep[sweep_idx])
-        sweep_duration_ms = (sweep_points / sample_rate) * 1000.0 if sample_rate > 0 else 0.0
+        segment_points = int(header.segment_points[segment_idx])
+        segment_duration_ms = (segment_points / sample_rate) * 1000.0 if sample_rate > 0 else 0.0
         default_from = float(session_manager.gui_setup.start_point) * 1000.0 / sample_rate if sample_rate > 0 else 0.0
         default_to = default_from + float(session_manager.gui_setup.duration_ms)
 
         window_from_spin = QDoubleSpinBox()
-        window_from_spin.setRange(0.0, max(0.0, sweep_duration_ms))
+        window_from_spin.setRange(0.0, max(0.0, segment_duration_ms))
         window_from_spin.setDecimals(3)
-        window_from_spin.setValue(max(0.0, min(float(params.get("window_from_ms", default_from)), sweep_duration_ms)))
+        window_from_spin.setValue(max(0.0, min(float(params.get("window_from_ms", default_from)), segment_duration_ms)))
         form.addRow("Window from (ms):", window_from_spin)
         window_to_spin = QDoubleSpinBox()
-        window_to_spin.setRange(0.0, max(0.0, sweep_duration_ms))
+        window_to_spin.setRange(0.0, max(0.0, segment_duration_ms))
         window_to_spin.setDecimals(3)
-        window_to_spin.setValue(max(0.0, min(float(params.get("window_to_ms", default_to)), sweep_duration_ms)))
+        window_to_spin.setValue(max(0.0, min(float(params.get("window_to_ms", default_to)), segment_duration_ms)))
         form.addRow("Window to (ms):", window_to_spin)
 
         pre_spin = QDoubleSpinBox()
@@ -190,23 +190,23 @@ class AlignedSpikesPlotAddOn(SpikeUtilsBase, BaseAddOn):
         }
 
     def run(self, session_manager, add_on_data_dir):
-        header = session_manager.header
+        header = session_manager.source_view
         add_on_data_dir = Path(add_on_data_dir)
         params = self._ask_parameters(session_manager, header, add_on_data_dir)
         if params is None:
             return
 
-        sweep_idx = int(session_manager.gui_setup.current_sweep_idx)
-        payload = self.read_spikes_payload(params["selected_dir"], sweep_idx)
+        segment_idx = int(session_manager.gui_setup.current_segment_idx)
+        payload = self.read_spikes_payload(params["selected_dir"], segment_idx)
         if payload is None:
-            QMessageBox.warning(None, "Aligned spikes plot", "No spikes for current sweep in selected set.")
+            QMessageBox.warning(None, "Aligned spikes plot", "No spikes for current segment in selected set.")
             return
 
         sample_rate = float(header.sample_rate)
-        sweep_points = int(header.number_of_points_per_sweep[sweep_idx])
+        segment_points = int(header.segment_points[segment_idx])
         channels = params["channels"]
         matrix = self.channel_matrix_from_session(
-            session_manager, channels, sweep_idx, 0, sweep_points, sample_rate
+            session_manager, channels, segment_idx, 0, segment_points, sample_rate
         )
         store = read_pipeline_store(self.pipelines_path(add_on_data_dir))
         processed = yield from self.iter_apply_pipeline(
@@ -226,7 +226,7 @@ class AlignedSpikesPlotAddOn(SpikeUtilsBase, BaseAddOn):
         total = len(channels)
         rendered = 0
         for row_idx, channel_idx in enumerate(channels):
-            signal = processed[row_idx].copy() if row_idx < processed.shape[0] else np.zeros(sweep_points)
+            signal = processed[row_idx].copy() if row_idx < processed.shape[0] else np.zeros(segment_points)
             channel_name = self.channel_name(header, int(channel_idx))
             spikes = payload.spikes_by_channel.get(int(channel_idx), [])
             waveforms = []

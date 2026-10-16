@@ -4,7 +4,7 @@ Add-ons that help build and extend the annotation vocabulary in Ephyr.
 
 ## Events detection (`events_detection`)
 
-**Runnable.** Scans the selected channels across all sweeps and appends detected markers to the session events vocabulary. If more than 1000 events are found, the user must confirm before they are added.
+**Runnable.** Scans the selected channels across all physical segments and appends detected markers to the session events vocabulary. If more than 1000 events are found, the user must confirm before they are added.
 
 Two detection modes:
 
@@ -44,7 +44,7 @@ Use (1) only when imaging really contains sync flashes. Prefer (2) for multimoda
 ### NWB imaging pipeline
 
 1. List imaging series in the NWB file
-2. Read ephys and imaging `starting_time` (prefer the ElectricalSeries location from the converted header)
+2. Read ephys and imaging `starting_time` (prefer the ElectricalSeries location from the active source name)
 3. Build an identity map: `imaging_ms = signal_ms + (ephys_start − imaging_start) · 1000`
 4. Open the sync window (TTL/flash UI hidden); optional manual pairs still refine the map
 

@@ -216,7 +216,7 @@ class VideoSyncWindow(QWidget):
         try:
             self._session_manager.start_point_changed.connect(self._on_time_changed)
             self._session_manager.duration_ms_changed.connect(self._on_time_changed)
-            self._session_manager.current_sweep_idx_changed.connect(self._on_sweep_changed)
+            self._session_manager.current_segment_idx_changed.connect(self._on_segment_changed)
         except Exception as e:
             ephyr_logger().debug(str(e))
 
@@ -229,7 +229,7 @@ class VideoSyncWindow(QWidget):
         try:
             self._session_manager.start_point_changed.disconnect(self._on_time_changed)
             self._session_manager.duration_ms_changed.disconnect(self._on_time_changed)
-            self._session_manager.current_sweep_idx_changed.disconnect(self._on_sweep_changed)
+            self._session_manager.current_segment_idx_changed.disconnect(self._on_segment_changed)
         except Exception as e:
             ephyr_logger().debug(str(e))
         self._persist()
@@ -249,7 +249,7 @@ class VideoSyncWindow(QWidget):
         return None
 
     def _signal_center_ms(self) -> float:
-        header = self._session_manager.header
+        header = self._session_manager.source_view
         sample_rate = float(header.sample_rate)
         gui = self._session_manager.gui_setup
         start_ms = (float(gui.start_point) / sample_rate) * 1000.0
@@ -257,15 +257,15 @@ class VideoSyncWindow(QWidget):
 
     def _center_signal_on_ms(self, time_ms: float) -> None:
         try:
-            header = self._session_manager.header
+            header = self._session_manager.source_view
             sample_rate = float(header.sample_rate)
             duration_ms = float(self._session_manager.gui_setup.duration_ms)
-            sweep_idx = int(self._session_manager.gui_setup.current_sweep_idx)
-            sweep_points = int(header.number_of_points_per_sweep[sweep_idx])
+            segment_idx = int(self._session_manager.gui_setup.current_segment_idx)
+            segment_points = int(header.segment_points[segment_idx])
             target_samples = int((float(time_ms) / 1000.0) * sample_rate)
             half_window = int((duration_ms / 2000.0) * sample_rate)
             new_start = max(0, target_samples - half_window)
-            max_start = max(0, sweep_points - int((duration_ms / 1000.0) * sample_rate))
+            max_start = max(0, segment_points - int((duration_ms / 1000.0) * sample_rate))
             new_start = min(new_start, max_start)
             self._session_manager.set_start_point(int(new_start))
         except Exception as e:
@@ -444,7 +444,7 @@ class VideoSyncWindow(QWidget):
                 )
         self._banner.setText(" ".join(bits))
 
-    def _on_sweep_changed(self, *_args) -> None:
+    def _on_segment_changed(self, *_args) -> None:
         self._on_time_changed()
 
     def _on_time_changed(self, *_args) -> None:

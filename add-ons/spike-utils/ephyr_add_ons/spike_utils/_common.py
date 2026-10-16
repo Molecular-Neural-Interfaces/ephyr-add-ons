@@ -5,12 +5,12 @@ locate/read the spike sets produced by the spike_detection and spike_importer
 add-ons. Depends only on shared core infrastructure, never on another add-on
 group.
 
-Every spike set lives in its own directory under the experiment-wide
+Every spike set lives in its own directory under the Record-wide
 ``add_ons/data/spike_sets`` folder, so that any spike add-on can read sets
 regardless of which add-on produced them:
 
     add_ons/data/spike_sets/{set_name}/spike_set_meta.json
-    add_ons/data/spike_sets/{set_name}/{sweep_idx}.spikes.json
+    add_ons/data/spike_sets/{set_name}/{segment_idx}.spikes.json
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -65,7 +65,7 @@ class SpikesPayload(BaseModel):
     source: str = SOURCE_DETECTED
     preprocessing_pipeline: str = DEFAULT_PIPELINE_NAME
     threshold: float = 6.0
-    sweep_idx: int
+    segment_idx: int
     sample_rate: float
     adaptive_sigma: bool = True
     sigma_params: Dict[str, Any] = Field(default_factory=dict)
@@ -82,6 +82,14 @@ class SpikesPayload(BaseModel):
     periods_mode: str = "ignore"
     source_file: str = ""
     spikes_by_channel: Dict[int, List[SpikePoint]] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_sweep_idx(cls, value):
+        if isinstance(value, dict) and "segment_idx" not in value and "sweep_idx" in value:
+            value = dict(value)
+            value["segment_idx"] = value.pop("sweep_idx")
+        return value
 
     def clusters(self) -> List[int]:
         found = {
@@ -385,7 +393,7 @@ class SpikeUtilsBase(EphyrAddOnMixin):
             except Exception as e:
                 ephyr_logger().debug(str(e))
 
-        # Fallback: infer from any sweep payload in the directory.
+        # Fallback: infer from any segment payload in the directory.
         for spikes_path in sorted(Path(set_dir).glob("*.spikes.json")):
             try:
                 payload = SpikesPayload.model_validate_json(spikes_path.read_text(encoding="utf-8"))
@@ -408,8 +416,8 @@ class SpikeUtilsBase(EphyrAddOnMixin):
         meta = self.read_spike_set_meta(set_dir)
         return meta.display_label(fallback_name=Path(set_dir).name)
 
-    def read_spikes_payload(self, set_dir: Path, sweep_idx: int) -> Optional[SpikesPayload]:
-        path = Path(set_dir) / f"{int(sweep_idx)}.spikes.json"
+    def read_spikes_payload(self, set_dir: Path, segment_idx: int) -> Optional[SpikesPayload]:
+        path = Path(set_dir) / f"{int(segment_idx)}.spikes.json"
         if not path.exists():
             return None
         try:

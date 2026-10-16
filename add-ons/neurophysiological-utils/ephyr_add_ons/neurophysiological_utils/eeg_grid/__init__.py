@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
 
 from ephyr.core.add_ons.base import BaseAddOn, ViewEntitiesZIndexEnum
 from ephyr.core.add_ons.common.mixin import EphyrAddOnMixin
-from ephyr.core.header import SignalUnitEnum
+from ephyr.core.units import SignalUnitEnum
 from ephyr.logger import ephyr_logger
 
 
@@ -235,7 +235,7 @@ class EEGGridAddOn(EphyrAddOnMixin, BaseAddOn):
             non_aux_only=True,
             fallback_all=False,
         )
-        header = session_manager.header
+        header = session_manager.source_view
         missing_geometry: List[str] = []
         # EEG sensitivity is defined in µV/mm, so only voltage channels can be calibrated.
         skipped_channels: List[int] = []
@@ -288,7 +288,7 @@ class EEGGridAddOn(EphyrAddOnMixin, BaseAddOn):
         warnings: List[str] = []
         if actual_duration != requested_duration:
             warnings.append(
-                "The requested duration was limited by the current sweep "
+                "The requested duration was limited by the current segment "
                 f"({requested_duration} ms requested, {actual_duration} ms applied)."
             )
         if missing_geometry:
@@ -348,7 +348,7 @@ class EEGGridAddOn(EphyrAddOnMixin, BaseAddOn):
         end_time_ms,
         sample_rate,
         axis_duration_ms,
-        sweep_idx,
+        segment_idx,
         visible_channel_indexes,
         channel_names,
         visible_events,
@@ -375,7 +375,7 @@ class EEGGridAddOn(EphyrAddOnMixin, BaseAddOn):
             end_time_ms,
             sample_rate,
             axis_duration_ms,
-            sweep_idx,
+            segment_idx,
             visible_channel_indexes,
             channel_names,
             visible_events,

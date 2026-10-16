@@ -1,9 +1,9 @@
 """Spike detection add-on.
 
-Runnable. Detects spikes on the full current sweep for the selected channels
+Runnable. Detects spikes on the full current segment for the selected channels
 using a configurable preprocessing pipeline and MAD-based detection (global or
 adaptive rolling sigma). Events and periods can be ignored. Results are stored
-per sweep so the viewer / navigation / aligned / raster add-ons can read them.
+per segment so the viewer / navigation / aligned / raster add-ons can read them.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ from ephyr_add_ons.spike_utils._common import (
     safe_detected_set_dir_name,
 )
 
-# Keep peak RAM near one channel trace on long HD-MEA sweeps.
+# Keep peak RAM near one channel trace on long HD-MEA segments.
 _GC_EVERY_N_CHANNELS = 4
 
 
@@ -241,15 +241,15 @@ class SpikeDetectionAddOn(SpikeUtilsBase, BaseAddOn):
         self,
         session_manager,
         channel_idx: int,
-        sweep_idx: int,
-        sweep_points: int,
+        segment_idx: int,
+        segment_points: int,
         sample_rate: float,
     ) -> np.ndarray:
         matrix = self.channel_matrix_from_session(
-            session_manager, [int(channel_idx)], sweep_idx, 0, sweep_points, sample_rate
+            session_manager, [int(channel_idx)], segment_idx, 0, segment_points, sample_rate
         )
         if matrix.size == 0:
-            return np.zeros(int(sweep_points), dtype=np.float64)
+            return np.zeros(int(segment_points), dtype=np.float64)
         return np.asarray(matrix[0], dtype=np.float64, order="C")
 
     def _detect_on_signal(
@@ -321,15 +321,15 @@ class SpikeDetectionAddOn(SpikeUtilsBase, BaseAddOn):
         ]
 
     def run(self, session_manager, add_on_data_dir):
-        header = session_manager.header
+        header = session_manager.source_view
         add_on_data_dir = Path(add_on_data_dir)
         params = self._ask_parameters(session_manager, header, add_on_data_dir)
         if params is None:
             return
 
-        sweep_idx = int(session_manager.gui_setup.current_sweep_idx)
+        segment_idx = int(session_manager.gui_setup.current_segment_idx)
         sample_rate = float(header.sample_rate)
-        sweep_points = int(header.number_of_points_per_sweep[sweep_idx])
+        segment_points = int(header.segment_points[segment_idx])
         channels = list(params["channels"])
         total = len(channels)
         if total == 0:
@@ -339,13 +339,13 @@ class SpikeDetectionAddOn(SpikeUtilsBase, BaseAddOn):
         pipeline = store.get(params["pipeline"])
         steps = enabled_steps(pipeline)
 
-        end_second = sweep_points / sample_rate if sample_rate > 0 else 0.0
+        end_second = segment_points / sample_rate if sample_rate > 0 else 0.0
         selection = params["selection"]
         valid_mask = self.build_selection_valid_mask(
             session_manager,
-            n_samples=sweep_points,
+            n_samples=segment_points,
             sample_rate=sample_rate,
-            sweep_idx=sweep_idx,
+            segment_idx=segment_idx,
             start_second=0.0,
             end_second=end_second,
             selection=selection,
@@ -369,10 +369,10 @@ class SpikeDetectionAddOn(SpikeUtilsBase, BaseAddOn):
         spikes_by_channel = {}
         for row_idx, channel_idx in enumerate(channels):
             signal = self._load_channel_signal(
-                session_manager, int(channel_idx), sweep_idx, sweep_points, sample_rate
+                session_manager, int(channel_idx), segment_idx, segment_points, sample_rate
             )
             signal = _apply_steps_1d(signal, sample_rate, steps)
-            # Mask may be full-sweep length; trim steps can shorten the trace.
+            # Mask may be full-segment length; trim steps can shorten the trace.
             channel_mask = valid_mask
             if channel_mask.size != signal.size:
                 channel_mask = (
@@ -412,7 +412,7 @@ class SpikeDetectionAddOn(SpikeUtilsBase, BaseAddOn):
             source=SOURCE_DETECTED,
             preprocessing_pipeline=params["pipeline"],
             threshold=float(threshold),
-            sweep_idx=sweep_idx,
+            segment_idx=segment_idx,
             sample_rate=sample_rate,
             adaptive_sigma=adaptive_sigma,
             sigma_params=sigma_params,
@@ -429,7 +429,7 @@ class SpikeDetectionAddOn(SpikeUtilsBase, BaseAddOn):
             periods_mode=str(selection.get("periods_mode", "ignore")),
             spikes_by_channel=spikes_by_channel,
         )
-        output_path = out_dir / f"{sweep_idx}.spikes.json"
+        output_path = out_dir / f"{segment_idx}.spikes.json"
         try:
             self.save_spikes_payload(output_path, payload)
             self.save_spike_set_meta(
