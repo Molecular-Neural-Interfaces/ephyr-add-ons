@@ -31,9 +31,7 @@ class SignalUtilsBase(EphyrAddOnMixin):
         return (points / sample_rate) * 1000.0
 
     def default_window_ms(self, session_manager, view) -> Tuple[float, float]:
-        sample_rate = float(view.sample_rate)
-        start_ms = float(session_manager.gui_setup.start_point) * 1000.0 / sample_rate if sample_rate > 0 else 0.0
-        return start_ms, start_ms + float(session_manager.gui_setup.duration_ms)
+        return self.visible_window_ms(session_manager, view)
 
     def resolve_window_samples(
         self, session_manager, view, window_from_ms: float, window_to_ms: float

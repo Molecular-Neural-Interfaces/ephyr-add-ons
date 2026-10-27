@@ -16,7 +16,6 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
-    QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
     QListWidget,
@@ -102,18 +101,13 @@ class PreprocessingPlotAddOn(SignalUtilsBase, BaseAddOn):
         form.addRow("", manage_btn)
 
         segment_duration_ms = self.segment_duration_ms(session_manager, header)
-        default_from, default_to = self.default_window_ms(session_manager, header)
-        window_from_spin = QDoubleSpinBox()
-        window_from_spin.setRange(0.0, max(0.0, segment_duration_ms))
-        window_from_spin.setDecimals(3)
-        window_from_spin.setValue(max(0.0, min(float(params.get("window_from_ms", default_from)), segment_duration_ms)))
-        form.addRow("Window from (ms):", window_from_spin)
-
-        window_to_spin = QDoubleSpinBox()
-        window_to_spin.setRange(0.0, max(0.0, segment_duration_ms))
-        window_to_spin.setDecimals(3)
-        window_to_spin.setValue(max(0.0, min(float(params.get("window_to_ms", default_to)), segment_duration_ms)))
-        form.addRow("Window to (ms):", window_to_spin)
+        view_start_ms, view_end_ms = self.visible_window_ms(session_manager, header)
+        window_from_spin, window_to_spin = self.add_time_window_rows(
+            form,
+            segment_duration_ms=segment_duration_ms,
+            start_ms=view_start_ms,
+            end_ms=view_end_ms,
+        )
 
         ep_sel = self.load_event_period_selection(common)
         events_list, before_spin, after_spin, events_mode_combo = self.build_ignore_events_controls(

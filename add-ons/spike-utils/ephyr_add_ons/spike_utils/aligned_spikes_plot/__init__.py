@@ -104,19 +104,13 @@ class AlignedSpikesPlotAddOn(SpikeUtilsBase, BaseAddOn):
         sample_rate = float(header.sample_rate)
         segment_points = int(header.segment_points[segment_idx])
         segment_duration_ms = (segment_points / sample_rate) * 1000.0 if sample_rate > 0 else 0.0
-        default_from = float(session_manager.gui_setup.start_point) * 1000.0 / sample_rate if sample_rate > 0 else 0.0
-        default_to = default_from + float(session_manager.gui_setup.duration_ms)
-
-        window_from_spin = QDoubleSpinBox()
-        window_from_spin.setRange(0.0, max(0.0, segment_duration_ms))
-        window_from_spin.setDecimals(3)
-        window_from_spin.setValue(max(0.0, min(float(params.get("window_from_ms", default_from)), segment_duration_ms)))
-        form.addRow("Window from (ms):", window_from_spin)
-        window_to_spin = QDoubleSpinBox()
-        window_to_spin.setRange(0.0, max(0.0, segment_duration_ms))
-        window_to_spin.setDecimals(3)
-        window_to_spin.setValue(max(0.0, min(float(params.get("window_to_ms", default_to)), segment_duration_ms)))
-        form.addRow("Window to (ms):", window_to_spin)
+        view_start_ms, view_end_ms = self.visible_window_ms(session_manager, header)
+        window_from_spin, window_to_spin = self.add_time_window_rows(
+            form,
+            segment_duration_ms=segment_duration_ms,
+            start_ms=view_start_ms,
+            end_ms=view_end_ms,
+        )
 
         pre_spin = QDoubleSpinBox()
         pre_spin.setRange(0.1, 100.0)
