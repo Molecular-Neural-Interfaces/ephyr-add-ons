@@ -1,31 +1,31 @@
 [
   {
     "label": "Labeling utils",
-    "module_name": "ephyr-labeling-utils",
+    "module_name": "ephyr-labeling",
     "keywords": ["events", "labeling", "TTL", "threshold", "annotation", "video", "sync"],
     "path": "add-ons/labeling-utils"
   },
   {
     "label": "Local field potential utils",
-    "module_name": "ephyr-lfp-utils",
+    "module_name": "ephyr-lfp",
     "keywords": ["LFP", "CSD", "current source density", "in vivo"],
     "path": "add-ons/lfp-utils"
   },
   {
     "label": "Neurophysiological utils",
-    "module_name": "ephyr-neurophysiological-utils",
+    "module_name": "ephyr-neurophysiological",
     "keywords": ["EEG", "clinical", "grid", "sensitivity", "sweep speed", "neurophysiology"],
     "path": "add-ons/neurophysiological-utils"
   },
   {
     "label": "Signal utils",
-    "module_name": "ephyr-signal-utils",
+    "module_name": "ephyr-spectrum",
     "keywords": ["signal", "preprocessing", "PSD", "spectrogram", "Welch"],
     "path": "add-ons/signal-utils"
   },
   {
     "label": "Spike utils",
-    "module_name": "ephyr-spike-utils",
+    "module_name": "ephyr-spikes",
     "keywords": ["spikes", "detection", "raster", "waveforms", "MAD"],
     "path": "add-ons/spike-utils"
   }
