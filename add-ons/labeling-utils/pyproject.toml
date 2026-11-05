@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ephyr-labeling-utils"
+name = "ephyr-labeling"
 version = "0.1.0"
 description = "Labeling tools for Ephyr: automatic event detection (TTL and above-threshold) and video / NWB imaging–timeline sync."
 readme = "README.md"

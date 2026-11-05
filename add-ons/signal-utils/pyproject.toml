@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ephyr-signal-utils"
+name = "ephyr-spectrum"
 version = "0.1.0"
 description = "Signal analysis tools for Ephyr: preprocessing comparison, Welch PSD, and STFT spectrograms."
 readme = "README.md"

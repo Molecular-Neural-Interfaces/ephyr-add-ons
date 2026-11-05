@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ephyr-lfp-utils"
+name = "ephyr-lfp"
 version = "0.1.0"
 description = "Local field potential tools for Ephyr: interpolated current-source density (CSD) overlay on the signal panel."
 readme = "README.md"
