@@ -62,7 +62,7 @@ Timestamps are `float64` in every known writer while the original format note me
 - `sample_idx = round(timestamp) - 1`, `time_ms = sample_idx / sample_rate × 1000`; channel numbers become 0-based; `.spk` sweep numbers (1-based) map to physical segments.
 - Amplitudes are stored as `value = -abs(amplitude)` with `polarity: negative`, because WEEGIT records the magnitude of a negative peak.
 - Nothing is written unless the file matches the active source. The import is aborted with the full list of problems when the data block size does not match the declared spike count, when a channel or sweep number is out of range, or when a spike sits beyond the end of its physical segment.
-- A file name that differs from the converted recording name is only a confirmable warning.
+- A file name that differs from the converted record name is only a confirmable warning.
 
 ## Spike viewer (`spike_viewer`)
 

@@ -329,20 +329,20 @@ class SpikeImporterAddOn(SpikeUtilsBase, BaseAddOn):
             )
             return
 
-        # A different recording name is suspicious but legitimate (renamed files).
+        # A different record name is suspicious but legitimate (renamed files).
         record = getattr(session_manager, "record", None)
-        recording_name = ""
+        record_name = ""
         if record is not None and record.inputs:
-            recording_name = str(record.inputs[0].root_name or "").strip()
-        if not recording_name:
-            recording_name = str(getattr(header, "record_name", "") or "").strip()
+            record_name = str(record.inputs[0].root_name or "").strip()
+        if not record_name:
+            record_name = str(getattr(header, "record_name", "") or "").strip()
         spk_stem = spk_path.name[: -len(".spk")] if spk_path.name.endswith(".spk") else spk_path.stem
-        if recording_name and spk_stem and Path(recording_name).stem != spk_stem:
+        if record_name and spk_stem and Path(record_name).stem != spk_stem:
             answer = QMessageBox.question(
                 None,
                 "Spike importer",
                 f"The file is named '{spk_stem}', while the Record came from "
-                f"'{recording_name}'.\n\nImport anyway?",
+                f"'{record_name}'.\n\nImport anyway?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if answer != QMessageBox.StandardButton.Yes:
