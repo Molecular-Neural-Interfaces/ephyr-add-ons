@@ -19,7 +19,7 @@
   },
   {
     "label": "Spectrum",
-    "module_name": "ephyr-spectrum",
+    "module_name": "ephyr-time-frequency-analysis",
     "keywords": ["signal", "preprocessing", "PSD", "spectrogram", "Welch"],
     "path": "add-ons/signal-utils"
   },
